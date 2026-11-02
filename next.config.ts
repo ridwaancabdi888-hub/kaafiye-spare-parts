@@ -2,6 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // Render metadata in <head> for every client: Chromium ignores a manifest <link> streamed into <body>,
+  // which would silently break PWA installation.
+  htmlLimitedBots: /.*/,
   async headers() {
     return [
       {

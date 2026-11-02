@@ -22,10 +22,3 @@ export async function signedImageUrls(supabase: SupabaseClient, paths: (string |
   const { data } = await supabase.storage.from(IMAGE_BUCKET).createSignedUrls(list, 60 * 60);
   return Object.fromEntries((data ?? []).filter((d) => d.signedUrl && d.path).map((d) => [d.path!, d.signedUrl])) as Record<string, string>;
 }
-
-export function stockState(p: Pick<Product, "stock_qty" | "low_stock_threshold" | "status">) {
-  if (p.status === "archived") return "archived" as const;
-  if (p.stock_qty <= 0) return "out" as const;
-  if (p.stock_qty <= p.low_stock_threshold) return "low" as const;
-  return "ok" as const;
-}

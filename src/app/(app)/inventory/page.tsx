@@ -5,7 +5,8 @@ import { listProducts, signedImageUrls } from "@/lib/data";
 import { fmtDate, fmtInt, fmtMoney, fmtUsd, fmtUsdPrecise, num } from "@/lib/format";
 import { FxWidget } from "@/components/FxWidget";
 import { PageHeader } from "@/components/PageHeader";
-import { StockTable, stockBadge } from "@/components/StockTable";
+import { StockTable } from "@/components/StockTable";
+import { stockBadge } from "@/lib/stock";
 import { ProductThumb } from "@/components/ProductIcon";
 
 export const metadata = { title: "Inventory" };

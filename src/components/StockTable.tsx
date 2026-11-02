@@ -3,14 +3,8 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useT } from "@/lib/i18n/client";
 import { fmtInt, fmtUsd, fmtUsdPrecise } from "@/lib/format";
+import { stockBadge } from "@/lib/stock";
 import type { Product } from "@/lib/types";
-
-export function stockBadge(p: Pick<Product, "stock_qty" | "low_stock_threshold" | "status">) {
-  if (p.status === "archived") return { key: "common.archived", cls: "text-muted" } as const;
-  if (p.stock_qty <= 0) return { key: "common.outOfStock", cls: "text-bad" } as const;
-  if (p.stock_qty <= p.low_stock_threshold) return { key: "common.lowStock", cls: "text-warn" } as const;
-  return { key: "common.inStock", cls: "text-ok" } as const;
-}
 
 export function StockTable({ products, linkToEdit = false, showSearch = true }: {
   products: Product[];
