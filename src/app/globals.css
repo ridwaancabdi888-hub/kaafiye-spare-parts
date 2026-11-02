@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: Arial, "Helvetica Neue", ui-sans-serif, system-ui, sans-serif;
+  --color-ink: #122b37;
+  --color-canvas: #f3f6f8;
+  --color-side: #092d35;
+  --color-side-text: #bdd2d6;
+  --color-side-active: #176e61;
+  --color-mint: #9cd6c6;
+  --color-brand: #118267;
+  --color-brand-700: #0d6b55;
+  --color-brand-soft: #e9f3f0;
+  --color-pill: #d7f2e7;
+  --color-tag: #ecf4f3;
+  --color-tag-ink: #247062;
+  --color-muted: #71828c;
+  --color-label: #59717b;
+  --color-line: #e7edef;
+  --color-field: #fafdfe;
+  --color-field-line: #d5e1e3;
+  --color-thead: #edf3f4;
+  --color-ok: #128367;
+  --color-warn: #c98022;
+  --color-bad: #c44747;
+}
+
+@layer base {
+  html { -webkit-text-size-adjust: 100%; }
+  body { @apply bg-canvas text-ink antialiased; font-size: 15px; }
+  input, select, textarea, button { font: inherit; }
+}
+
+@layer components {
+  .card { @apply rounded-2xl border border-line bg-white p-5 shadow-[0_4px_16px_#092d3508]; }
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-[9px] bg-brand px-[18px] py-3 font-bold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60; }
+  .btn-light { @apply inline-flex items-center justify-center gap-2 rounded-[9px] bg-brand-soft px-4 py-2.5 font-bold text-[#086652] transition hover:bg-pill disabled:opacity-60; }
+  .btn-danger { @apply inline-flex items-center justify-center gap-2 rounded-[9px] bg-[#fbeaea] px-4 py-2.5 font-bold text-bad transition hover:bg-[#f6d5d5] disabled:opacity-60; }
+  .btn-sm { @apply px-3 py-1.5 text-sm; }
+  .field-label { @apply mb-2 block text-[13px] font-bold text-label; }
+  .input { @apply w-full rounded-[9px] border border-field-line bg-field px-[15px] py-3 text-[#263e46] outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/20; }
+  .tag { @apply inline-flex items-center rounded-lg bg-tag px-2.5 py-1.5 text-[11px] text-tag-ink; }
+  .pill { @apply inline-flex items-center rounded-full bg-pill px-3 py-1.5 text-xs font-bold text-[#14705b]; }
+  .muted { @apply text-[13px] text-muted; }
+  .section-head { @apply mb-4 mt-8 flex flex-wrap items-center justify-between gap-3; }
+  .section-head h2 { @apply text-[19px] font-bold; }
+  .tbl { @apply w-full border-collapse overflow-hidden rounded-xl bg-white text-sm; }
+  .tbl th { @apply bg-thead px-4 py-3.5 text-left text-xs font-bold uppercase text-[#637c84]; }
+  .tbl td { @apply border-b border-[#edf0f0] px-4 py-3.5 text-left align-middle; }
+  .tbl-wrap { @apply overflow-x-auto rounded-xl border border-line bg-white; }
+  .row-item { @apply flex items-center justify-between gap-3 border-b border-[#edf1f1] py-3.5 last:border-0; }
+}
