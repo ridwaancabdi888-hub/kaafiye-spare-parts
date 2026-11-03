@@ -4,17 +4,29 @@ Multi-business inventory, simple POS and Banjarka (tyre-repair) records for a sm
 Next.js 15 (App Router) · TypeScript · Tailwind 4 · Supabase (Postgres, Auth, Storage) · installable PWA.
 Somali by default, English toggle (remembered in a cookie).
 
-## Status (2 Nov 2026)
+## Status (3 Nov 2026)
 
 | Item | State |
 |---|---|
-| Typecheck, lint, `next build` | ✅ pass |
-| 49 automated tests (`npm test`) | ✅ pass — the real SQL migrations run in Postgres (PGlite) with a small Supabase shim |
-| Login page, PWA manifest, service worker, icons, SO/EN toggle | ✅ smoke-tested on `next start` |
-| Supabase project | ❌ **Not created.** There was no Supabase CLI or account access from this machine. Follow *Setup* below. |
-| Signed-in pages against a live Supabase | ❌ Not exercised end-to-end yet (needs the project + keys) |
-| Vercel deployment | ❌ Not done |
-| Live FX feed | ❌ None — no verified source exists for the Somaliland Shilling market rate (it has no ISO code, and public FX APIs don't carry it). The rate is **admin-managed with history and a stale warning**. 11,800 is seeded only as a flagged *example*. |
+| Production | ✅ https://kaafiye-spare-parts.vercel.app (Vercel, auto-deploys from `main`) |
+| Database | ✅ Supabase project `kjmhgnntiuvgshbgxodm`; migrations 0001–0003 applied, RLS on every table |
+| Auth | ✅ Public signup disabled; staff log in with **username + password** |
+| Kaafiye inventory | ✅ Owner-approved baseline imported: 10 products, 233 units, $575 retail (`supabase/seed/kaafiye_initial_inventory.sql`) |
+| Tests | `npm test` — SQL rules run in real Postgres (PGlite) + unit tests |
+| Live FX feed | ❌ None — no verified source exists for the Somaliland Shilling market rate. The rate is **admin-managed with history and a stale warning**. 11,800 is seeded only as a flagged *example*. |
+
+## Accounts and sign-in
+
+- Staff sign in with a **username** (e.g. `kaafiye01`) and password. The server maps the username to the
+  Supabase Auth account; e-mails are never sent to the browser and every failure shows the same message.
+- **Throttling:** 5 failed attempts per account or 30 per IP within 15 minutes → wait 15 minutes.
+- **Passwords:** at least 8 characters; very common / sequential passwords and passwords containing the
+  username are refused. No forced symbol rules.
+- **Admins** create staff (username + temporary password), reset passwords without the old one, set
+  usernames and disable/enable accounts. The **Super Admin** does the same for business admins.
+  Temporary passwords must be changed at the next sign-in. Every action is written to `account_events`
+  (append-only, never the password).
+- Accounts created earlier with an e-mail can keep using it, or get a username via **Staff → Set username**.
 
 ## What is enforced where
 
@@ -87,9 +99,9 @@ The public login page has **"⬇ Ku rakib App-ka / Install App"**. You don't hav
 There is no APK. The service worker caches only static files. Pages and saves always need a connection, and when offline the app shows an honest "nothing can be saved offline" page.
 
 ## Known limitations / next steps
-- **Needed from the owner:** the current on-hand count and actual selling price for each product, and the Geelle invoice date. None of these were invented.
-- **FX:** set manually. If a trustworthy SlSh market-rate source turns up, add a Supabase scheduled function that inserts into `fx_rates` with `source='auto:<name>'`. The UI already shows the source and timestamp.
-- **One business per staff account.** A person who needs two businesses needs two logins.
-- **One product per sale.** To change the product on a sale, void it and record it again.
-- **Not built yet:** CSV bulk import (CSV export is available) and multiple photos per product (only one photo per product for now).
-- **Login is required online.** There is no offline queueing, by design.
+- **Missing purchase costs:** Xaydh Weyn, Xaydh Yar, Filter and Taayir R18 have no known cost price, so their
+  profit is overstated until the admin enters it (the app marks them "cost not set" and reports warn).
+- **FX:** set manually. If a trustworthy SlSh market-rate source appears, insert into `fx_rates` with
+  `source='auto:<name>'` from a scheduled job.
+- **One business per staff account.** **One product per sale.** **One photo per product.**
+- **No offline saving**, by design: the app shows an honest offline page.
