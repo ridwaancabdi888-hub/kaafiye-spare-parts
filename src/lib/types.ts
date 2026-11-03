@@ -10,6 +10,7 @@ export interface Membership {
   full_name: string;
   username: string | null;
   active: boolean;
+  must_change_password?: boolean;
   created_at: string;
 }
 

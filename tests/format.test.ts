@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { banjarkaSplit, editTimeLeft, EDIT_WINDOW_MS, fmtMoney, fmtSlsh, fmtUsd, fmtUsdPrecise, periodRange, rangeToIso, toUsd } from "@/lib/format";
 import { errorKey } from "@/lib/errors";
-import { loginToEmail } from "@/lib/staff";
+import { isValidUsername, usernameToEmail } from "@/lib/staff";
+import { passwordProblem } from "@/lib/password";
+import { fmtDate, fmtDateTime, fmtDuration, fmtLongDate } from "@/lib/format";
 import { dictionaries } from "@/lib/i18n/dict";
 
 describe("formatting", () => {
@@ -58,12 +60,40 @@ describe("errors + logins + i18n", () => {
     expect(errorKey({ message: "EDIT_WINDOW_CLOSED", code: "42501" })).toBe("err.EDIT_WINDOW_CLOSED");
     expect(errorKey({ message: "some internal detail" })).toBe("err.generic");
   });
-  it("usernames become synthetic e-mails", () => {
-    expect(loginToEmail("Ali")).toBe("ali@staff.kaafiye.local");
-    expect(loginToEmail("a@b.com")).toBe("a@b.com");
+  it("usernames: format and synthetic auth e-mail", () => {
+    expect(usernameToEmail(" Kaafiye01 ")).toBe("kaafiye01@staff.kaafiye.local");
+    expect(isValidUsername("kaafiye01")).toBe(true);
+    expect(isValidUsername("ab")).toBe(false);
+    expect(isValidUsername("ali@x.com")).toBe(false);
   });
   it("Somali dictionary covers every English key", () => {
     expect(Object.keys(dictionaries.so).sort()).toEqual(Object.keys(dictionaries.en).sort());
     expect(Object.values(dictionaries.so).every((v) => v.length > 0)).toBe(true);
+  });
+});
+
+describe("password policy", () => {
+  it("min 8, no forced symbols, blocks the obvious", () => {
+    expect(passwordProblem("1234")).toBe("err.PASSWORD_SHORT");
+    expect(passwordProblem("12345678")).toBe("err.PASSWORD_WEAK");
+    expect(passwordProblem("98765432")).toBe("err.PASSWORD_WEAK");
+    expect(passwordProblem("aaaaaaaa")).toBe("err.PASSWORD_WEAK");
+    expect(passwordProblem("password")).toBe("err.PASSWORD_WEAK");
+    expect(passwordProblem("kaafiye01pass", "kaafiye01")).toBe("err.PASSWORD_HAS_USERNAME");
+    expect(passwordProblem("geel iyo ari")).toBeNull();
+    expect(passwordProblem("hargeisa2026")).toBeNull();
+  });
+});
+
+describe("Somali dates never use English month names", () => {
+  const d = "2026-11-02T11:05:00Z"; // 14:05 in Hargeisa
+  it("formats per language", () => {
+    expect(fmtDate(d, "so")).toBe("2 Nof 2026");
+    expect(fmtDate(d, "en")).toBe("2 Nov 2026");
+    expect(fmtDateTime(d, "so")).toBe("2 Nof 2026, 14:05");
+    expect(fmtLongDate(d, "so")).toBe("Isniin, 2 Nofembar 2026");
+    expect(fmtLongDate(d, "en")).toBe("Monday, 2 November 2026");
+    expect(fmtDuration(3 * 3600000 + 20 * 60000, "so")).toBe("3 saac 20 daq");
+    expect(fmtDuration(3 * 3600000 + 20 * 60000, "en")).toBe("3h 20m");
   });
 });

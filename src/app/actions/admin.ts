@@ -1,9 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/session";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { errorKey, type ActionState } from "@/lib/errors";
-import { isValidUsername, loginToEmail } from "@/lib/staff";
 import type { DictKey } from "@/lib/i18n/dict";
 
 const str = (f: FormData, k: string) => {
@@ -47,13 +45,16 @@ function productFields(f: FormData) {
     low_stock_threshold: low ?? 3,
   };
 }
+const badNumbers = (p: ReturnType<typeof productFields>) =>
+  [p.cost_usd, p.sell_price_usd ?? 0, p.low_stock_threshold].some((n) => Number.isNaN(n) || n < 0) ||
+  !Number.isInteger(p.low_stock_threshold);
 
 export async function createProduct(_: ActionState, f: FormData): Promise<ActionState> {
   const ctx = await adminCtx();
   if (!ctx) return fail("err.ADMIN_ONLY");
   const fields = productFields(f);
   if (!fields.name) return fail("err.REQUIRED");
-  if ([fields.cost_usd, fields.sell_price_usd ?? 0, fields.low_stock_threshold].some((n) => Number.isNaN(n) || n < 0)) return fail("err.INVALID_AMOUNT");
+  if (badNumbers(fields)) return fail("err.INVALID_AMOUNT");
   const opening = numOrNull(f, "opening_stock");
   if (opening !== null && (Number.isNaN(opening) || !Number.isInteger(opening) || opening < 0)) return fail("err.INVALID_QUANTITY");
 
@@ -61,7 +62,7 @@ export async function createProduct(_: ActionState, f: FormData): Promise<Action
   if (error) return fail(errorKey(error));
   if (opening && opening > 0) {
     const r = await ctx.supabase.rpc("adjust_stock", {
-      p_product_id: data.id, p_qty_change: opening, p_kind: "opening", p_note: "Opening count", p_unit_cost_usd: null,
+      p_product_id: data.id, p_qty_change: opening, p_kind: "opening", p_note: null, p_unit_cost_usd: null,
     });
     if (r.error) return fail(errorKey(r.error));
   }
@@ -74,7 +75,7 @@ export async function updateProduct(_: ActionState, f: FormData): Promise<Action
   if (!ctx) return fail("err.ADMIN_ONLY");
   const fields = productFields(f);
   if (!fields.name) return fail("err.REQUIRED");
-  if ([fields.cost_usd, fields.sell_price_usd ?? 0, fields.low_stock_threshold].some((n) => Number.isNaN(n) || n < 0)) return fail("err.INVALID_AMOUNT");
+  if (badNumbers(fields)) return fail("err.INVALID_AMOUNT");
   const id = str(f, "id");
   const { error } = await ctx.supabase.from("products").update(fields).eq("id", id).eq("business_id", ctx.businessId);
   if (error) return fail(errorKey(error));
@@ -147,125 +148,5 @@ export async function updateBusinessSettings(_: ActionState, f: FormData): Promi
   }).eq("business_id", ctx.businessId);
   if (error) return fail(errorKey(error));
   revalidatePath("/", "layout");
-  return done();
-}
-
-// ───────────── Staff accounts (service role, after admin check) ─────────────
-
-async function createLogin(identifier: string, password: string, fullName: string): Promise<{ error: DictKey } | { userId: string; username: string | null }> {
-  const login = identifier.toLowerCase();
-  if (!login.includes("@") && !isValidUsername(login)) return { error: "err.REQUIRED" as const };
-  if (password.length < 8) return { error: "err.WEAK_PASSWORD" as const };
-  const admin = createAdminClient();
-  const { data, error } = await admin.auth.admin.createUser({
-    email: loginToEmail(login),
-    password,
-    email_confirm: true,
-    user_metadata: { full_name: fullName }, // display only — roles live in public.memberships
-  });
-  if (error) return { error: /already|exists|registered/i.test(error.message) ? ("err.USERNAME_TAKEN" as const) : ("err.generic" as const) };
-  return { userId: data.user.id, username: login.includes("@") ? null : login };
-}
-
-export async function createStaff(_: ActionState, f: FormData): Promise<ActionState> {
-  const ctx = await adminCtx();
-  if (!ctx) return fail("err.ADMIN_ONLY");
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return fail("users.serviceKeyMissing");
-  const fullName = str(f, "full_name");
-  const role = str(f, "role") === "admin" ? "admin" : "user";
-  if (!fullName) return fail("err.REQUIRED");
-  const created = await createLogin(str(f, "username"), String(f.get("password") ?? ""), fullName);
-  if ("error" in created) return fail(created.error);
-
-  const admin = createAdminClient();
-  const { error } = await admin.from("memberships").insert({
-    business_id: ctx.businessId, user_id: created.userId, role, full_name: fullName, username: created.username,
-  });
-  if (error) {
-    await admin.auth.admin.deleteUser(created.userId);
-    return fail(errorKey(error));
-  }
-  revalidatePath("/users");
-  return done(created.userId);
-}
-
-async function targetInMyBusiness(userId: string) {
-  const ctx = await adminCtx();
-  if (!ctx || userId === ctx.userId) return null; // admins cannot lock themselves out
-  const { data } = await ctx.supabase.from("memberships").select("user_id").eq("user_id", userId).eq("business_id", ctx.businessId).maybeSingle();
-  return data ? ctx : null;
-}
-
-export async function setStaffActive(userId: string, active: boolean): Promise<ActionState> {
-  const ctx = await targetInMyBusiness(userId);
-  if (!ctx) return fail("err.ADMIN_ONLY");
-  const admin = createAdminClient();
-  const { error } = await admin.from("memberships").update({ active }).eq("user_id", userId).eq("business_id", ctx.businessId);
-  if (error) return fail(errorKey(error));
-  // Also block sign-in at the auth layer (RLS already denies data access once inactive).
-  await admin.auth.admin.updateUserById(userId, { ban_duration: active ? "none" : "876000h" });
-  revalidatePath("/users");
-  return done(userId);
-}
-
-export async function resetStaffPassword(_: ActionState, f: FormData): Promise<ActionState> {
-  const userId = str(f, "user_id");
-  const ctx = await targetInMyBusiness(userId);
-  if (!ctx) return fail("err.ADMIN_ONLY");
-  const password = String(f.get("password") ?? "");
-  if (password.length < 8) return fail("err.WEAK_PASSWORD");
-  const { error } = await createAdminClient().auth.admin.updateUserById(userId, { password });
-  if (error) return fail("err.generic");
-  return done(userId);
-}
-
-// ───────────── Super admin ─────────────
-
-export async function createBusinessWithAdmin(_: ActionState, f: FormData): Promise<ActionState> {
-  const s = await getSession();
-  if (!s?.isSuper) return fail("err.SUPER_ADMIN_ONLY");
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return fail("users.serviceKeyMissing");
-  const name = str(f, "name");
-  const slug = str(f, "slug").toLowerCase();
-  const adminName = str(f, "admin_name");
-  if (!name || !/^[a-z0-9-]{2,40}$/.test(slug) || !adminName) return fail("err.REQUIRED");
-
-  const { data: businessId, error } = await s.supabase.rpc("create_business", { p_name: name, p_slug: slug });
-  if (error) return fail(errorKey(error));
-  const created = await createLogin(str(f, "admin_login"), String(f.get("admin_password") ?? ""), adminName);
-  if ("error" in created) {
-    revalidatePath("/super");
-    return fail(created.error); // business exists; admin can be added again from the list
-  }
-  const { error: mErr } = await createAdminClient().from("memberships").insert({
-    business_id: businessId, user_id: created.userId, role: "admin", full_name: adminName, username: created.username,
-  });
-  if (mErr) return fail(errorKey(mErr));
-  revalidatePath("/super");
-  return done(businessId as string);
-}
-
-export async function addBusinessAdmin(_: ActionState, f: FormData): Promise<ActionState> {
-  const s = await getSession();
-  if (!s?.isSuper) return fail("err.SUPER_ADMIN_ONLY");
-  const businessId = str(f, "business_id");
-  const adminName = str(f, "admin_name");
-  if (!adminName || !businessId) return fail("err.REQUIRED");
-  const created = await createLogin(str(f, "admin_login"), String(f.get("admin_password") ?? ""), adminName);
-  if ("error" in created) return fail(created.error);
-  const { error } = await createAdminClient().from("memberships").insert({
-    business_id: businessId, user_id: created.userId, role: "admin", full_name: adminName, username: created.username,
-  });
-  if (error) return fail(errorKey(error));
-  revalidatePath("/super");
-  return done();
-}
-
-export async function setBusinessActive(businessId: string, active: boolean): Promise<ActionState> {
-  const s = await getSession();
-  if (!s?.isSuper) return fail("err.SUPER_ADMIN_ONLY");
-  const { error } = await s.supabase.from("businesses").update({ active }).eq("id", businessId);
-  if (error) return fail(errorKey(error));
-  revalidatePath("/super");
   return done();
 }

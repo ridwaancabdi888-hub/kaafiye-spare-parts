@@ -1,13 +1,15 @@
 import Link from "next/link";
 import { getFx, getStaffNames, requireMember, type MemberSession } from "@/lib/session";
-import { getT } from "@/lib/i18n/server";
-import { listProducts } from "@/lib/data";
-import { fmtInt, fmtUsd, localDate, monthStart, num, periodRange, rangeToIso } from "@/lib/format";
+import { getLang, getT } from "@/lib/i18n/server";
+import { listProducts, signedImageUrls } from "@/lib/data";
+import { fmtInt, fmtLongDate, fmtUsd, localDate, monthStart, num, periodRange, rangeToIso } from "@/lib/format";
+import type { Product, ReportSummary, Sale } from "@/lib/types";
 import { FxWidget } from "@/components/FxWidget";
-import { PageHeader, StatCard } from "@/components/PageHeader";
-import { StockTable } from "@/components/StockTable";
-import { PeriodTabs, parsePeriod } from "@/components/PeriodTabs";
-import type { ReportSummary } from "@/lib/types";
+import { Icon, type IconName } from "@/components/Icon";
+import { EmptyState, PageHeader, SectionHeader, StatCard } from "@/components/kit";
+import { PeriodChips, parsePeriod } from "@/components/PeriodChips";
+import { ProductThumb } from "@/components/ProductIcon";
+import { SalesList } from "@/components/lists";
 
 export const metadata = { title: "Dashboard" };
 
@@ -17,102 +19,172 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   return s.isAdmin ? <AdminDashboard s={s} period={parsePeriod(sp.period)} /> : <StaffDashboard s={s} />;
 }
 
-async function AdminDashboard({ s, period }: { s: MemberSession; period: ReturnType<typeof parsePeriod> }) {
-  const t = await getT();
-  const range = periodRange(period);
-  const [fx, products, staff, report] = await Promise.all([
+async function shared(s: MemberSession) {
+  const [fx, products, staff, recent] = await Promise.all([
     getFx(s.business.id),
     listProducts(s.supabase, s.business.id),
     getStaffNames(s.business.id),
+    s.supabase.from("sales").select("*").eq("business_id", s.business.id).order("created_at", { ascending: false }).limit(5),
+  ]);
+  const low = products.filter((p) => p.stock_qty <= p.low_stock_threshold).sort((a, b) => a.stock_qty - b.stock_qty);
+  const images = await signedImageUrls(s.supabase, low.slice(0, 6).map((p) => p.image_path));
+  return { fx, products, staff, recent: (recent.data ?? []) as Sale[], low, images };
+}
+
+async function AdminDashboard({ s, period }: { s: MemberSession; period: ReturnType<typeof parsePeriod> }) {
+  const [t, lang] = await Promise.all([getT(), getLang()]);
+  const range = periodRange(period);
+  const [{ fx, products, staff, recent, low, images }, report] = await Promise.all([
+    shared(s),
     s.supabase.rpc("report_summary", { p_from: range.from, p_to: range.to }),
   ]);
   const r = (report.data ?? {}) as Partial<ReportSummary>;
   const units = products.reduce((a, p) => a + p.stock_qty, 0);
-  const low = products.filter((p) => p.stock_qty <= p.low_stock_threshold).length;
-  const periodLabel = period === "today" ? t("common.today") : period === "month" ? t("common.month") : t("common.allTime");
+  const retail = products.reduce((a, p) => a + p.stock_qty * (p.sell_price_usd ?? 0), 0);
+  const names = Object.fromEntries(products.map((p) => [p.id, p.name]));
 
   return (
     <>
-      <PageHeader title={t("dash.title")} />
+      <PageHeader title={t("dash.greeting", { name: s.membership.full_name.split(" ")[0] })} subtitle={fmtLongDate(new Date(), lang)} />
       <FxWidget rate={fx?.rate ?? null} staleHours={fx?.staleHours ?? 24} canChange />
 
-      <div className="mb-4 flex justify-end">
-        <PeriodTabs base="/dashboard" period={period} />
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h2 className="section-title">{t("dash.title")}</h2>
       </div>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label={t("dash.sparePartsSales")} value={fmtUsd(r.sales_usd)} hint={`${periodLabel} • ${fmtInt(r.sales_count)} ${t("rep.salesCount").toLowerCase()}`} />
-        <StatCard label={t("dash.banjarkaIncome")} value={fmtUsd(r.banjarka_gross_usd)} hint={periodLabel} />
-        <StatCard label={t("dash.expenses")} value={fmtUsd(num(r.cash_expenses_usd) + num(r.item_usage_cost_usd))} hint={`${periodLabel} • ${t("exp.cash")} + ${t("exp.item")}`} />
-        <StatCard label={t("dash.stockUnits")} value={`${fmtInt(units)} PCS`} hint={`${products.length} ${t("sp.product").toLowerCase()}`} />
+      <PeriodChips base="/dashboard" period={period} />
+      <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+        <StatCard icon="cart" label={t("dash.sales")} value={fmtUsd(r.sales_usd)} hint={`${fmtInt(r.sales_count)} ${t("common.records")}`} />
+        <StatCard icon="trending" tone="navy" label={t("dash.profit")} value={fmtUsd(r.gross_profit_usd)} />
+        <StatCard icon="wrench" tone="green" label={t("dash.banjarkaShop")} value={fmtUsd(r.banjarka_shop_usd)} />
+        <StatCard icon="wallet" tone="rose" label={t("dash.expenses")} value={fmtUsd(num(r.cash_expenses_usd) + num(r.item_usage_cost_usd))} />
       </div>
 
-      <div className="section-head">
-        <h2>{t("dash.inventoryNow")}</h2>
-        <Link href="/inventory/new" className="btn">{t("dash.newProduct")}</Link>
+      <SectionHeader title={t("dash.quickActions")} />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Quick href="/spare-parts" icon="cart" label={t("dash.newSale")} primary />
+        <Quick href="/banjarka" icon="wrench" label={t("dash.newBanjarka")} />
+        <Quick href="/inventory/new" icon="plus" label={t("dash.newProduct")} />
+        <Quick href="/reports" icon="chart" label={t("dash.viewReports")} />
       </div>
-      <StockTable products={products} linkToEdit />
 
-      <div className="section-head">
-        <h2>{t("dash.staffReports")}</h2>
-        <Link href="/reports" className="tag">{t("common.today")} • {t("common.month")} • {t("common.allTime")} →</Link>
-      </div>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label={t("dash.staffCount")} value={String(staff.rows.filter((m) => m.active).length).padStart(2, "0")} />
-        <StatCard label={t("dash.editedRecords")} value={String(num(r.edited_count)).padStart(2, "0")} hint={periodLabel} />
-        <StatCard label={t("dash.lowStockCount")} value={String(low).padStart(2, "0")} />
-        <StatCard label={t("dash.banjarkaShop")} value={fmtUsd(r.banjarka_shop_usd)} hint={periodLabel} />
+      <div className="mt-2 grid gap-x-6 lg:grid-cols-2">
+        <div>
+          <SectionHeader title={t("dash.stockSummary")} action={<Link href="/inventory" className="text-[13px] font-semibold text-brand-700">{t("common.viewAll")}</Link>} />
+          <div className="grid grid-cols-3 gap-3">
+            <Mini label={t("dash.products")} value={fmtInt(products.length)} />
+            <Mini label={t("dash.stockUnits")} value={fmtInt(units)} />
+            <Mini label={t("dash.retailValue")} value={fmtUsd(retail)} />
+          </div>
+          <SectionHeader title={`${t("dash.lowStockTitle")} (${low.length})`} />
+          <LowStock products={low} images={images} empty={t("empty.lowStock")} pcs={t("common.pcs")} />
+        </div>
+        <div>
+          <SectionHeader title={t("dash.recentSales")} action={<Link href="/spare-parts" className="text-[13px] font-semibold text-brand-700">{t("common.viewAll")}</Link>} />
+          <SalesList rows={recent} products={names} ctx={{ userId: s.user.id, isAdmin: true, names: staff.names }} actions={false} />
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <Mini label={t("dash.staffCount")} value={fmtInt(staff.rows.filter((m) => m.active).length)} />
+            <Mini label={t("dash.editedRecords")} value={fmtInt(r.edited_count)} />
+          </div>
+        </div>
       </div>
     </>
   );
 }
 
 async function StaffDashboard({ s }: { s: MemberSession }) {
-  const t = await getT();
+  const [t, lang] = await Promise.all([getT(), getLang()]);
   const today = rangeToIso({ from: localDate(), to: localDate() });
-  const [fx, products, mySales, myBj] = await Promise.all([
-    getFx(s.business.id),
-    listProducts(s.supabase, s.business.id),
+  const [{ fx, products, staff, recent, low, images }, mySales, myBj] = await Promise.all([
+    shared(s),
     s.supabase.from("sales").select("total_usd").eq("created_by", s.user.id).eq("status", "active").gte("created_at", today.start!),
     s.supabase.from("banjarka_records").select("worker_share_usd").eq("created_by", s.user.id).eq("status", "active").gte("work_date", monthStart()),
   ]);
-  const salesToday = (mySales.data ?? []).reduce((a, r) => a + num(r.total_usd), 0);
-  const shareMonth = (myBj.data ?? []).reduce((a, r) => a + num(r.worker_share_usd), 0);
+  const salesToday = (mySales.data ?? []).reduce((a, x) => a + num(x.total_usd), 0);
+  const shareMonth = (myBj.data ?? []).reduce((a, x) => a + num(x.worker_share_usd), 0);
+  const names = Object.fromEntries(products.map((p) => [p.id, p.name]));
 
   return (
     <>
-      <PageHeader title={t("dash.staffTitle")} />
+      <PageHeader title={t("dash.greeting", { name: s.membership.full_name.split(/[\s(]/)[0] })} subtitle={fmtLongDate(new Date(), lang)} />
       <FxWidget rate={fx?.rate ?? null} staleHours={fx?.staleHours ?? 24} canChange={false} />
 
-      <div className="section-head">
-        <h2>{t("common.yourWork")} / Your work</h2>
-        <span className="tag">{t("common.onlyTwo")}</span>
-      </div>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <WorkTile icon="🛞" title={t("nav.spareParts")} desc={t("dash.recordSaleDesc")} href="/spare-parts" cta={t("dash.recordSale")}
-          meta={`${t("dash.mySalesToday")}: ${fmtUsd(salesToday)}`} />
-        <WorkTile icon="🔧" title={t("nav.banjarka")} desc={t("dash.recordBanjarkaDesc")} href="/banjarka" cta={t("dash.recordBanjarka")}
-          meta={`${t("dash.myShareMonth")}: ${fmtUsd(shareMonth)}`} />
+      <h2 className="section-title mb-3">{t("common.yourWork")}</h2>
+      <div className="grid gap-3 sm:grid-cols-2 sm:gap-4">
+        <WorkTile href="/spare-parts" icon="cart" title={t("nav.spareParts")} desc={t("dash.tileSaleDesc")} cta={t("dash.tileSaleCta")}
+          metaLabel={t("dash.mySalesToday")} meta={fmtUsd(salesToday)} />
+        <WorkTile href="/banjarka" icon="wrench" title={t("nav.banjarka")} desc={t("dash.tileBjDesc")} cta={t("dash.tileBjCta")}
+          metaLabel={t("dash.myShareMonth")} meta={fmtUsd(shareMonth)} navy />
       </div>
 
-      <div className="section-head">
-        <h2>{t("dash.stockViewOnly")}</h2>
-        <span className="tag">{t("common.search")} & {t("common.lowStock")}</span>
+      <div className="grid gap-x-6 lg:grid-cols-2">
+        <div>
+          <SectionHeader title={`${t("dash.lowStockTitle")} (${low.length})`} action={<Link href="/inventory" className="text-[13px] font-semibold text-brand-700">{t("common.viewAll")}</Link>} />
+          <LowStock products={low} images={images} empty={t("empty.lowStock")} pcs={t("common.pcs")} />
+        </div>
+        <div>
+          <SectionHeader title={t("dash.recentSales")} action={<Link href="/spare-parts" className="text-[13px] font-semibold text-brand-700">{t("common.viewAll")}</Link>} />
+          <SalesList rows={recent} products={names} ctx={{ userId: s.user.id, isAdmin: false, names: staff.names }} actions={false} />
+        </div>
       </div>
-      <StockTable products={products} />
     </>
   );
 }
 
-function WorkTile({ icon, title, desc, href, cta, meta }: { icon: string; title: string; desc: string; href: string; cta: string; meta: string }) {
+function Quick({ href, icon, label, primary }: { href: string; icon: IconName; label: string; primary?: boolean }) {
   return (
-    <div className="min-h-[165px] rounded-[18px] border border-[#e2eaec] bg-white p-6 sm:p-[30px]">
-      <div className="text-[34px]" aria-hidden>{icon}</div>
-      <h2 className="mb-1 mt-4 text-[22px] font-bold">{title}</h2>
-      <p className="muted mb-4">{desc}</p>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Link href={href} className="btn">{cta}</Link>
-        <span className="text-sm text-label">{meta}</span>
-      </div>
+    <Link href={href} className={`flex min-h-[4.5rem] items-center gap-3 rounded-2xl border p-3.5 font-semibold transition active:scale-[.98] ${
+      primary ? "border-brand-600 bg-brand-600 text-white shadow-sm hover:bg-brand-700" : "border-line bg-white text-ink hover:border-brand-300"}`}>
+      <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${primary ? "bg-white/15" : "bg-brand-50 text-brand-700"}`}>
+        <Icon name={icon} />
+      </span>
+      <span className="min-w-0 text-[14px] leading-tight">{label}</span>
+    </Link>
+  );
+}
+
+function Mini({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-2xl border border-line bg-white p-3">
+      <div className="truncate text-[11.5px] font-semibold text-muted">{label}</div>
+      <div className="num mt-1 truncate text-[17px] font-extrabold text-navy-900 sm:text-[19px]">{value}</div>
     </div>
+  );
+}
+
+function WorkTile({ href, icon, title, desc, cta, metaLabel, meta, navy }: {
+  href: string; icon: IconName; title: string; desc: string; cta: string; metaLabel: string; meta: string; navy?: boolean;
+}) {
+  return (
+    <Link href={href} className={`group relative overflow-hidden rounded-2xl p-5 text-white shadow-[var(--shadow-card)] transition active:scale-[.99] sm:p-6 ${
+      navy ? "bg-gradient-to-br from-navy-800 to-navy-950" : "bg-gradient-to-br from-brand-500 to-brand-700"}`}>
+      <div aria-hidden className="pointer-events-none absolute -right-10 -top-10 h-36 w-36 rounded-full bg-white/10" />
+      <span className="grid h-12 w-12 place-items-center rounded-2xl bg-white/15"><Icon name={icon} className="h-6 w-6" /></span>
+      <h3 className="mt-4 text-[22px] font-extrabold">{title}</h3>
+      <p className="mt-1 text-[14px] text-white/80">{desc}</p>
+      <div className="mt-5 flex flex-wrap items-end justify-between gap-3">
+        <span className="inline-flex h-11 items-center gap-2 rounded-xl bg-white px-4 text-[14px] font-bold text-navy-900 transition group-hover:gap-3">
+          <Icon name="plus" className="h-4 w-4" /> {cta}
+        </span>
+        <span className="text-right">
+          <span className="block text-[11.5px] text-white/70">{metaLabel}</span>
+          <span className="num block text-[18px] font-extrabold">{meta}</span>
+        </span>
+      </div>
+    </Link>
+  );
+}
+
+function LowStock({ products, images, empty, pcs }: { products: Product[]; images: Record<string, string>; empty: string; pcs: string }) {
+  if (!products.length) return <EmptyState icon="checkCircle" text={empty} />;
+  return (
+    <ul className="card-tight divide-y divide-line">
+      {products.slice(0, 6).map((p) => (
+        <li key={p.id} className="flex items-center gap-3 px-4 py-3">
+          <ProductThumb product={p} url={p.image_path ? images[p.image_path] : undefined} />
+          <span className="min-w-0 flex-1 truncate font-semibold">{p.name}</span>
+          <span className={`badge num ${p.stock_qty <= 0 ? "badge-red" : "badge-amber"}`}>{fmtInt(p.stock_qty)} {pcs}</span>
+        </li>
+      ))}
+    </ul>
   );
 }

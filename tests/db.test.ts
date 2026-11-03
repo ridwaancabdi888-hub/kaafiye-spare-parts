@@ -359,6 +359,51 @@ describe("banjarka 50/50", () => {
   });
 });
 
+describe("accounts: usernames, audit log, login throttling", () => {
+  const asService = <T>(fn: (q: Db["query"]) => Promise<T>) =>
+    db.transaction(async (tx) => {
+      await tx.query("set local role service_role");
+      return fn(tx.query.bind(tx) as Db["query"]);
+    });
+
+  it("usernames are unique and well-formed", async () => {
+    await db.query("update memberships set username = 'kaafiye01' where user_id = $1", [userA1]);
+    await expect(db.query("update memberships set username = 'kaafiye01' where user_id = $1", [userA2])).rejects.toThrow(/memberships_username_key/);
+    await expect(db.query("update memberships set username = 'Bad Name!' where user_id = $1", [userA2])).rejects.toThrow(/memberships_username_format/);
+    const r = await db.query<{ must_change_password: boolean }>("select must_change_password from memberships where user_id = $1", [userA1]);
+    expect(r.rows[0].must_change_password).toBe(false);
+  });
+
+  it("account events: append-only, tenant-scoped, never writable by API users", async () => {
+    await db.query("insert into account_events (business_id, target_user, actor, event) values ($1, $2, $3, 'password_reset')", [bizA, userA1, adminA]);
+    await expect(db.query("update account_events set event = 'enabled'")).rejects.toThrow(/APPEND_ONLY/);
+    await expect(db.query("delete from account_events")).rejects.toThrow(/APPEND_ONLY/);
+    await expect(
+      asUser(db, adminA, (q) => q("insert into account_events (business_id, event) values ($1, 'enabled')", [bizA])),
+    ).rejects.toThrow(/permission denied/);
+    expect((await asUser(db, adminA, (q) => q("select * from account_events"))).rows).toHaveLength(1);
+    expect((await asUser(db, adminB, (q) => q("select * from account_events"))).rows).toHaveLength(0);
+    expect((await asUser(db, userA1, (q) => q("select * from account_events"))).rows).toHaveLength(0);
+  });
+
+  it("login throttling is server-only and locks after repeated failures", async () => {
+    await expect(asUser(db, userA1, (q) => q("select * from login_attempts"))).rejects.toThrow(/permission denied/);
+    await expect(asUser(db, userA1, (q) => q("select login_wait_seconds(array['k'], array[5])"))).rejects.toThrow(/permission denied/);
+    await expect(asUser(db, userA1, (q) => q("select login_record('k', 'ip', true)"))).rejects.toThrow(/permission denied/);
+
+    const wait = async () =>
+      asService(async (q) => (await q<{ w: number }>("select login_wait_seconds(array['user-x', 'ip-x'], array[5, 30]) as w")).rows[0].w);
+    for (let i = 0; i < 4; i++) await asService((q) => q("select login_record('user-x', 'ip-x', false)"));
+    expect(await wait()).toBe(0);
+    await asService((q) => q("select login_record('user-x', 'ip-x', false)"));
+    const w = await wait();
+    expect(w).toBeGreaterThan(800);
+    expect(w).toBeLessThanOrEqual(900);
+    await asService((q) => q("select login_record('user-x', 'ip-x', true)"));
+    expect(await wait()).toBe(0); // success clears the account's failure streak
+  });
+});
+
 describe("fx + reports", () => {
   it("only admins set rates; new rate does not change old records", async () => {
     await expect(asUser(db, userA1, (q) => q("select set_fx_rate(12000)"))).rejects.toThrow(/ADMIN_ONLY/);

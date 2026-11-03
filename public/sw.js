@@ -1,6 +1,6 @@
 // Kaafiye service worker: caches the static app shell only.
 // Data and form submissions always go to the network — nothing is queued or "saved offline".
-const CACHE = "kaafiye-shell-v1";
+const CACHE = "kaafiye-shell-v2";
 const SHELL = ["/offline.html", "/icons/icon-192.png", "/icons/icon-512.png", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {

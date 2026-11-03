@@ -1,14 +1,13 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getStaffNames, requireAdmin } from "@/lib/session";
 import { getLang, getT } from "@/lib/i18n/server";
-import { fmtDateTime, fmtMoney, fmtUsdPrecise, type Currency } from "@/lib/format";
-import { PageHeader } from "@/components/PageHeader";
-import { RecordActions } from "@/components/RecordActions";
+import { fmtDateTime, fmtMoney, fmtUsdPrecise, fmtWorkDate, type Currency } from "@/lib/format";
 import type { DictKey } from "@/lib/i18n/dict";
 import type { BanjarkaRecord, Expense, Revision, Sale } from "@/lib/types";
+import { Alert, EmptyState, PageHeader } from "@/components/kit";
+import { RecordActions } from "@/components/RecordActions";
 
-export const metadata = { title: "Record history" };
+export const metadata = { title: "History" };
 
 const FIELDS = {
   sales: ["quantity", "unit_price", "currency", "total", "total_usd", "profit_usd", "note", "status", "void_reason"],
@@ -16,15 +15,7 @@ const FIELDS = {
   banjarka_records: ["work_date", "currency", "gross", "expenses", "expense_reason", "net", "worker_share", "shop_share", "status", "void_reason"],
 } as const;
 type Table = keyof typeof FIELDS;
-
-function show(key: string, row: Record<string, unknown>) {
-  const v = row[key];
-  if (v === null || v === undefined || v === "") return "—";
-  const cur = row.currency as Currency;
-  if (["unit_price", "total", "amount", "gross", "expenses", "net", "worker_share", "shop_share"].includes(key)) return fmtMoney(v, cur);
-  if (key.endsWith("_usd")) return fmtUsdPrecise(v);
-  return String(v);
-}
+const MONEY = ["unit_price", "total", "amount", "gross", "expenses", "net", "worker_share", "shop_share"];
 
 export default async function HistoryPage({ params }: { params: Promise<{ table: string; id: string }> }) {
   const { table, id } = await params;
@@ -39,45 +30,59 @@ export default async function HistoryPage({ params }: { params: Promise<{ table:
   ]);
   if (!record) notFound();
   const revisions = (revs ?? []) as Revision[];
-  const fields = FIELDS[tbl];
+
+  const show = (key: string, row: Record<string, unknown>) => {
+    const v = row[key];
+    if (v === null || v === undefined || v === "") return "—";
+    if (MONEY.includes(key)) return fmtMoney(v, row.currency as Currency);
+    if (key.endsWith("_usd")) return fmtUsdPrecise(v);
+    if (key === "work_date") return fmtWorkDate(String(v), lang);
+    if (key === "status") return v === "voided" ? t("common.voided") : t("common.active");
+    if (key === "kind") return v === "cash" ? t("exp.cash") : t("exp.item");
+    if (key === "currency") return v === "SLSH" ? "SlSh" : "USD";
+    return String(v);
+  };
 
   return (
     <>
-      <PageHeader title={`${t(`rep.table.${tbl}` as DictKey)} — ${t("rep.edits")}`} />
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <Link href="/reports" className="muted hover:underline">{t("common.back")}</Link>
-        {tbl === "sales" && <RecordActions table="sales" record={record as Sale} isOwn={record.created_by === s.user.id} isAdmin />}
-        {tbl === "expenses" && <RecordActions table="expenses" record={record as Expense} isOwn={record.created_by === s.user.id} isAdmin />}
-        {tbl === "banjarka_records" && <RecordActions table="banjarka_records" record={record as BanjarkaRecord} isOwn={record.created_by === s.user.id} isAdmin />}
-      </div>
-      <p className="muted mb-4">{t("rep.correctionHint")}</p>
-
-      {/* Versions side by side, oldest first; changed fields highlighted. */}
-      <div className="flex gap-[18px] overflow-x-auto pb-3">
-        {revisions.map((v) => (
-          <div key={v.id} className="card w-[300px] shrink-0">
-            <h3 className="font-bold">
-              {t(`rep.action.${v.action}` as DictKey)} • {fmtDateTime(v.created_at, lang)}
-            </h3>
-            <div className="muted mb-2">
-              {t("rep.by")} {v.actor ? staff.names[v.actor] ?? "—" : "—"}
-              {v.reason && <> • “{v.reason}”</>}
+      <PageHeader
+        title={`${t(`rep.table.${tbl}` as DictKey)} — ${t("rep.edits")}`}
+        back={{ href: "/reports", label: t("rep.title") }}
+        actions={
+          tbl === "sales" ? <RecordActions table="sales" record={record as Sale} isOwn={record.created_by === s.user.id} isAdmin />
+          : tbl === "expenses" ? <RecordActions table="expenses" record={record as Expense} isOwn={record.created_by === s.user.id} isAdmin />
+          : <RecordActions table="banjarka_records" record={record as BanjarkaRecord} isOwn={record.created_by === s.user.id} isAdmin />
+        }
+      />
+      <Alert tone="info" className="mb-4">{t("rep.correctionHint")}</Alert>
+      {revisions.length ? (
+        // Versions side by side (scroll sideways on phones), oldest first; changed fields highlighted.
+        <div className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-3 sm:mx-0 sm:px-0">
+          {revisions.map((v) => (
+            <div key={v.id} className="card w-[85vw] max-w-[320px] shrink-0 snap-start">
+              <div className="font-bold">{t(`rep.action.${v.action}` as DictKey)}</div>
+              <div className="text-[12.5px] text-muted">{fmtDateTime(v.created_at, lang)}</div>
+              <div className="mt-1 text-[12.5px] text-muted">{t("rep.by", { name: v.actor ? staff.names[v.actor] ?? "—" : "—" })}{v.reason ? ` · “${v.reason}”` : ""}</div>
+              <div className="mt-3">
+                {FIELDS[tbl].map((f) => {
+                  const changed = v.changed_fields.includes(f);
+                  return (
+                    <div key={f} className={`row text-[13.5px] ${changed ? "-mx-2 rounded-lg border-0 bg-brand-50 px-2" : ""}`}>
+                      <span className="text-muted">{t(`field.${f}` as DictKey)}</span>
+                      <span className="num text-right font-semibold">
+                        {changed && v.before && <span className="mr-1.5 font-normal text-rose-600 line-through">{show(f, v.before)}</span>}
+                        <span className={changed ? "text-brand-700" : ""}>{show(f, v.after)}</span>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-            {fields.map((f) => {
-              const changed = v.changed_fields.includes(f);
-              return (
-                <div key={f} className={`row-item text-sm ${changed ? "-mx-2 rounded-md bg-pill px-2" : ""}`}>
-                  <span className="text-label">{f}</span>
-                  <strong className={changed ? "text-ok" : ""}>
-                    {changed && v.before && <span className="mr-1 font-normal text-bad line-through">{show(f, v.before)}</span>}
-                    {show(f, v.after)}
-                  </strong>
-                </div>
-              );
-            })}
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <EmptyState icon="history" text={t("empty.history")} />
+      )}
     </>
   );
 }

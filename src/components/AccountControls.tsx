@@ -1,0 +1,98 @@
+"use client";
+import { useActionState, useEffect, useState, useTransition } from "react";
+import { resetPassword, setAccountActive, setUsername } from "@/app/actions/account";
+import { useT } from "@/lib/i18n/client";
+import { Icon } from "./Icon";
+import { Alert } from "./kit";
+import { FormMessage, Modal, PasswordInput, SubmitButton } from "./ui";
+
+/** Reset password / set username / enable–disable for one account (server re-checks permission). */
+export function AccountControls({ userId, name, username, active }: { userId: string; name: string; username: string | null; active: boolean }) {
+  const t = useT();
+  const [open, setOpen] = useState<null | "password" | "username">(null);
+  const [pending, start] = useTransition();
+  const [toggleError, setToggleError] = useState(false);
+  return (
+    <div className="flex flex-wrap gap-2">
+      <button type="button" className="btn-soft btn-sm" onClick={() => setOpen("password")}><Icon name="key" className="h-4 w-4" /> {t("users.resetPassword")}</button>
+      <button type="button" className="btn-secondary btn-sm" onClick={() => setOpen("username")}><Icon name="at" className="h-4 w-4" /> {t("users.setUsername")}</button>
+      <button type="button" disabled={pending} className={active ? "btn-danger btn-sm" : "btn-soft btn-sm"}
+        onClick={() => start(async () => setToggleError(Boolean((await setAccountActive(userId, !active))?.error)))}>
+        <Icon name={active ? "ban" : "checkCircle"} className="h-4 w-4" /> {active ? t("users.disable") : t("users.enable")}
+      </button>
+      {toggleError && <Alert tone="error" className="w-full">{t("err.generic")}</Alert>}
+      <Modal open={open === "password"} onClose={() => setOpen(null)} title={`${t("users.resetPassword")} — ${name}`}>
+        <ResetForm userId={userId} onDone={() => setOpen(null)} />
+      </Modal>
+      <Modal open={open === "username"} onClose={() => setOpen(null)} title={`${t("users.setUsername")} — ${name}`}>
+        <UsernameForm userId={userId} current={username} onDone={() => setOpen(null)} />
+      </Modal>
+    </div>
+  );
+}
+
+function useCloseOnOk(state: { ok?: boolean; at?: number } | undefined, onDone: () => void) {
+  useEffect(() => {
+    if (!state?.ok) return;
+    const id = setTimeout(onDone, 1200);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.at]);
+}
+
+function ResetForm({ userId, onDone }: { userId: string; onDone: () => void }) {
+  const t = useT();
+  const [state, action] = useActionState(resetPassword, undefined);
+  useCloseOnOk(state, onDone);
+  return (
+    <form action={action}>
+      <input type="hidden" name="user_id" value={userId} />
+      <p className="hint mb-4">{t("users.resetHelp")}</p>
+      <label className="label">{t("users.password")}</label>
+      <PasswordInput name="password" autoComplete="new-password" minLength={8} />
+      <SubmitButton className="btn btn-block mt-5">{t("common.save")}</SubmitButton>
+      <FormMessage state={state} />
+    </form>
+  );
+}
+
+function UsernameForm({ userId, current, onDone }: { userId: string; current: string | null; onDone: () => void }) {
+  const t = useT();
+  const [state, action] = useActionState(setUsername, undefined);
+  useCloseOnOk(state, onDone);
+  return (
+    <form action={action}>
+      <input type="hidden" name="user_id" value={userId} />
+      <label className="label">{t("users.username")}</label>
+      <input name="username" className="input" defaultValue={current ?? ""} autoCapitalize="none" autoCorrect="off" spellCheck={false}
+        pattern="[A-Za-z0-9._\-]{3,32}" required placeholder="kaafiye01" />
+      <p className="hint mt-1.5">{t("users.usernameHelp")}</p>
+      <SubmitButton className="btn btn-block mt-5">{t("common.save")}</SubmitButton>
+      <FormMessage state={state} />
+    </form>
+  );
+}
+
+/** Create-account form fields shared by "add staff" and "add admin". */
+export function NewAccountFields({ nameLabel, usernameLabel, passwordLabel }: { nameLabel?: string; usernameLabel?: string; passwordLabel?: string }) {
+  const t = useT();
+  return (
+    <>
+      <div className="field">
+        <label className="label">{nameLabel ?? t("users.fullName")}</label>
+        <input name="full_name" className="input" required autoComplete="off" />
+      </div>
+      <div className="field">
+        <label className="label">{usernameLabel ?? t("users.username")}</label>
+        <input name="username" className="input" required autoCapitalize="none" autoCorrect="off" spellCheck={false}
+          pattern="[A-Za-z0-9._\-]{3,32}" placeholder="kaafiye01" autoComplete="off" />
+        <p className="hint mt-1.5">{t("users.usernameHelp")}</p>
+      </div>
+      <div className="field">
+        <label className="label">{passwordLabel ?? t("users.password")}</label>
+        <PasswordInput name="password" autoComplete="new-password" minLength={8} />
+        <p className="hint mt-1.5">{t("users.passwordHelp")}</p>
+      </div>
+    </>
+  );
+}

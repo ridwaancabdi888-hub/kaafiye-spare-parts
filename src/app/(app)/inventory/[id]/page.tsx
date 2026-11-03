@@ -1,12 +1,12 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getStaffNames, requireAdmin } from "@/lib/session";
 import { getLang, getT } from "@/lib/i18n/server";
 import { signedImageUrls } from "@/lib/data";
+import { stockBadge } from "@/lib/stock";
 import { fmtDateTime, fmtInt, fmtUsdPrecise } from "@/lib/format";
-import { PageHeader } from "@/components/PageHeader";
 import type { DictKey } from "@/lib/i18n/dict";
 import type { Product } from "@/lib/types";
+import { DataTable, EmptyState, PageHeader, SectionHeader } from "@/components/kit";
 import { ProductForm } from "../ProductForm";
 import { ArchiveButton, StockAdjustForm } from "./StockAdjustForm";
 
@@ -16,6 +16,7 @@ type Movement = {
   id: number; qty_change: number; balance_after: number; kind: string; unit_cost_usd: number | null;
   note: string | null; created_by: string | null; created_at: string;
 };
+const BADGE = { "common.inStock": "badge-green", "common.lowStock": "badge-amber", "common.outOfStock": "badge-red", "common.archived": "badge-slate" } as const;
 
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -29,55 +30,51 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
     s.supabase.from("stock_movements").select("*").eq("product_id", id).order("id", { ascending: false }).limit(100),
     getStaffNames(s.business.id),
   ]);
+  const b = stockBadge(product);
+  const rows = (movements.data ?? []) as Movement[];
+  const qty = (m: Movement) => <span className={`num font-bold ${m.qty_change > 0 ? "text-brand-700" : "text-rose-600"}`}>{m.qty_change > 0 ? "+" : ""}{m.qty_change}</span>;
 
   return (
     <>
-      <PageHeader title={product.name} />
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <Link href="/inventory" className="muted hover:underline">{t("common.back")}</Link>
-        <div className="flex items-center gap-3">
-          <span className="pill">{t("inv.stock")}: {fmtInt(product.stock_qty)} {product.unit}</span>
-          <ArchiveButton productId={product.id} status={product.status} />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-[18px] xl:grid-cols-[1.4fr_.6fr]">
+      <PageHeader
+        title={product.name}
+        back={{ href: "/inventory", label: t("inv.title") }}
+        subtitle={<span className="flex flex-wrap items-center gap-2"><span className={`badge ${BADGE[b.key]}`}>{t(b.key)}</span><span className="num font-semibold text-ink">{t("inv.stockNow")}: {fmtInt(product.stock_qty)} {t("common.pcs")}</span></span>}
+        actions={<ArchiveButton productId={product.id} status={product.status} />}
+      />
+      <div className="grid gap-4 xl:grid-cols-[1fr_340px] xl:items-start">
         <ProductForm product={product} imageUrl={product.image_path ? images[product.image_path] : undefined} businessId={s.business.id} />
         <StockAdjustForm productId={product.id} />
       </div>
 
-      <div className="section-head"><h2>{t("inv.movements")}</h2></div>
-      <div className="tbl-wrap">
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th>{t("common.date")}</th>
-              <th>{t("exp.kind")}</th>
-              <th>{t("inv.qtyChange")}</th>
-              <th>{t("inv.stock")}</th>
-              <th>{t("inv.costUsd")}</th>
-              <th>{t("common.employee")}</th>
-              <th>{t("common.note")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {((movements.data ?? []) as Movement[]).map((m) => (
-              <tr key={m.id}>
-                <td className="whitespace-nowrap">{fmtDateTime(m.created_at, lang)}</td>
-                <td>{t(`inv.kind.${m.kind}` as DictKey)}</td>
-                <td className={`font-bold ${m.qty_change > 0 ? "text-ok" : "text-bad"}`}>{m.qty_change > 0 ? "+" : ""}{m.qty_change}</td>
-                <td>{m.balance_after}</td>
-                <td>{m.unit_cost_usd !== null ? fmtUsdPrecise(m.unit_cost_usd) : "—"}</td>
-                <td>{m.created_by ? staff.names[m.created_by] ?? "—" : "—"}</td>
-                <td className="muted">{m.note ?? ""}</td>
-              </tr>
-            ))}
-            {!movements.data?.length && (
-              <tr><td colSpan={7} className="text-center text-muted">{t("common.none")}</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <SectionHeader title={t("inv.movements")} />
+      <DataTable
+        rows={rows}
+        rowKey={(m) => String(m.id)}
+        empty={<EmptyState icon="history" text={t("empty.history")} />}
+        columns={[
+          { header: t("common.date"), cell: (m) => <span className="whitespace-nowrap text-[13px]">{fmtDateTime(m.created_at, lang)}</span> },
+          { header: t("exp.kind"), cell: (m) => t(`inv.kind.${m.kind}` as DictKey) },
+          { header: t("inv.qtyChange"), cell: qty },
+          { header: t("inv.stockNow"), cell: (m) => <span className="num">{m.balance_after}</span> },
+          { header: t("inv.costUsd"), cell: (m) => <span className="num">{m.unit_cost_usd !== null ? fmtUsdPrecise(m.unit_cost_usd) : "—"}</span> },
+          { header: t("common.employee"), cell: (m) => (m.created_by ? staff.names[m.created_by] ?? "—" : "—") },
+          { header: t("field.note"), cell: (m) => <span className="text-[13px] text-muted">{m.note ?? ""}</span> },
+        ]}
+        card={(m) => (
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="font-semibold">{t(`inv.kind.${m.kind}` as DictKey)}</div>
+              <div className="text-[12.5px] text-muted">{fmtDateTime(m.created_at, lang)}{m.created_by && staff.names[m.created_by] ? ` · ${staff.names[m.created_by]}` : ""}</div>
+              {m.note && <div className="mt-1 text-[13px] text-muted">{m.note}</div>}
+            </div>
+            <div className="shrink-0 text-right">
+              <div className="text-lg">{qty(m)}</div>
+              <div className="num text-[12px] text-muted">= {m.balance_after}</div>
+            </div>
+          </div>
+        )}
+      />
     </>
   );
 }

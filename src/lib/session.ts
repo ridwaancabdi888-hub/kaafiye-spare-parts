@@ -8,14 +8,19 @@ export const getSession = cache(async () => {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
-  const [{ data: membership }, { data: superRow }] = await Promise.all([
-    supabase.from("memberships").select("*").eq("user_id", user.id).eq("active", true).maybeSingle<Membership>(),
+  // One round-trip for membership + its business (RLS lets members read their own business).
+  const [{ data: row }, { data: superRow }] = await Promise.all([
+    supabase.from("memberships").select("*, business:businesses(id, name, slug, active)").eq("user_id", user.id).eq("active", true)
+      .maybeSingle<Membership & { business: { id: string; name: string; slug: string; active: boolean } | null }>(),
     supabase.from("super_admins").select("user_id").eq("user_id", user.id).maybeSingle(),
   ]);
-  let business: { id: string; name: string; slug: string } | null = null;
-  if (membership) {
-    const { data } = await supabase.from("businesses").select("id, name, slug").eq("id", membership.business_id).maybeSingle();
-    business = data;
+  const biz = row?.business;
+  const business = biz && biz.active ? { id: biz.id, name: biz.name, slug: biz.slug } : null;
+  let membership: Membership | null = null;
+  if (row) {
+    const { business: _drop, ...m } = row;
+    void _drop;
+    membership = m;
   }
   return {
     supabase,
