@@ -107,3 +107,18 @@ export async function voidRecord(_: ActionState, f: FormData): Promise<ActionSta
   if (!(table in VOID_FN)) return { error: "err.generic", at: Date.now() };
   return rpc(VOID_FN[table], { p_id: str(f, "id"), p_reason: str(f, "edit_reason") }, [...SP_PATHS, ...BJ_PATHS]);
 }
+
+// Rewards are a record of what the admin decided to give; nothing is paid or deducted automatically.
+export async function recordReward(_: ActionState, f: FormData): Promise<ActionState> {
+  const amount = numOrNull(f, "amount");
+  if (!str(f, "user_id")) return { error: "err.REQUIRED", at: Date.now() };
+  if (amount === null || Number.isNaN(amount)) return { error: "err.INVALID_AMOUNT", at: Date.now() };
+  return rpc("record_reward", {
+    p_user_id: str(f, "user_id"), p_amount: amount, p_currency: currency(f),
+    p_reward_date: str(f, "reward_date") || null, p_reason: str(f, "reason"),
+  }, ["/users"]);
+}
+
+export async function voidReward(_: ActionState, f: FormData): Promise<ActionState> {
+  return rpc("void_reward", { p_id: str(f, "id"), p_reason: str(f, "reason") }, ["/users"]);
+}

@@ -432,3 +432,91 @@ describe("fx + reports", () => {
     await db.query("update memberships set active = true where user_id = $1", [userA2]);
   });
 });
+
+describe("display currency, performance, rewards, archive", () => {
+  let bizC: string;
+  let adminC: string;
+  let workerC: string;
+  let productC: string;
+  const report = (uid: string) => asUser(db, uid, async (q) => (await one(q<{ r: Record<string, number> }>("select report_summary() as r"))).r);
+  const perf = async (uid: string) =>
+    (await asUser(db, uid, async (q) => (await one(q<{ r: Record<string, number | string>[] }>("select staff_performance() as r"))).r));
+
+  beforeAll(async () => {
+    bizC = (await asUser(db, superId, (q) => one(q<{ id: string }>("select create_business('Perf', 'perf') as id")))).id;
+    adminC = await createAuthUser(db, "admin@c");
+    workerC = await createAuthUser(db, "w@c");
+    await addMember(adminC, bizC, "admin", "Admin C");
+    await addMember(workerC, bizC, "user", "Worker C");
+    productC = await asUser(db, adminC, async (q) => {
+      const p = await one(q<{ id: string }>("insert into products (business_id, name, cost_usd) values ($1, 'Taayir', 5) returning id", [bizC]));
+      await q("select adjust_stock($1, 20, 'opening', null)", [p.id]);
+      return p.id;
+    });
+  });
+
+  it("80,000 SlSh at 11,800 stays 80,000 SlSh / $6.78 after the rate changes", async () => {
+    await asUser(db, workerC, (q) => q("select record_sale($1, 1, 80000, 'SLSH')", [productC]));
+    await asUser(db, adminC, (q) => q("select set_fx_rate(11000)"));
+    await asUser(db, workerC, (q) => q("select record_sale($1, 1, 10, 'USD')", [productC]));
+    const r = await report(adminC);
+    expect(Number(r.sales_slsh)).toBe(80000 + 110000);
+    expect(Number(r.sales_usd)).toBeCloseTo(6.78 + 10, 2);
+    expect(r.sales_by_currency).toEqual({ SLSH: 80000, USD: 10 });
+    // COGS uses each sale's own snapshot: $5 × 11,800 + $5 × 11,000.
+    expect(Number(r.cogs_slsh)).toBe(59000 + 55000);
+    expect(Number(r.gross_profit_slsh)).toBe(190000 - 114000);
+  });
+
+  it("performance: per employee, voided excluded, edits counted once, banjarka split", async () => {
+    const tmp = await asUser(db, workerC, async (q) => (await one(q<{ id: string }>("select record_sale($1, 2, 10, 'USD') as id", [productC]))).id);
+    await asUser(db, workerC, (q) => q("select update_sale($1, 1, 10, 'USD')", [tmp]));
+    const gone = await asUser(db, workerC, async (q) => (await one(q<{ id: string }>("select record_sale($1, 1, 99, 'USD') as id", [productC]))).id);
+    await asUser(db, workerC, (q) => q("select void_sale($1, 'wrong entry')", [gone]));
+    await asUser(db, workerC, (q) => q("select record_banjarka(110000, 22000, 'SLSH', 'Kharash shaqo')"));
+    const w = (await perf(adminC)).find((x) => x.user_id === workerC)!;
+    expect(w.sales_count).toBe(3);
+    expect(Number(w.sales_usd)).toBeCloseTo(6.78 + 10 + 10, 2);
+    expect(Number(w.sales_slsh)).toBe(80000 + 110000 + 110000);
+    expect(Number(w.bj_gross_slsh)).toBe(110000);
+    expect(Number(w.bj_net_slsh)).toBe(88000);
+    expect(Number(w.bj_worker_slsh)).toBe(44000);
+    expect(Number(w.bj_shop_slsh)).toBe(44000);
+    expect(Number(w.bj_shop_usd)).toBe(4);
+    expect(Number(w.business_usd)).toBeCloseTo(Number(w.sales_usd) + 4, 2);
+    expect(Number(w.business_slsh)).toBe(300000 + 44000);
+  });
+
+  it("performance is admin-only and tenant-scoped", async () => {
+    await expect(perf(workerC)).rejects.toThrow(/ADMIN_ONLY/);
+    const ids = (await perf(adminA)).map((x) => x.user_id);
+    expect(ids).not.toContain(workerC);
+    expect(ids).toContain(userA1);
+  });
+
+  it("rewards: admin-only, same business, snapshot rate, audited, void needs a reason", async () => {
+    const id = await asUser(db, adminC, async (q) =>
+      (await one(q<{ id: string }>("select record_reward($1, 22000, 'SLSH', current_date, 'Top seller') as id", [workerC]))).id);
+    const rw = await db.query<Record<string, string>>("select * from employee_rewards where id = $1", [id]);
+    expect(Number(rw.rows[0].amount)).toBe(22000);
+    expect(Number(rw.rows[0].amount_usd)).toBe(2);
+    await expect(asUser(db, workerC, (q) => q("select record_reward($1, 5, 'USD', current_date, 'self')", [workerC]))).rejects.toThrow(/ADMIN_ONLY/);
+    await expect(asUser(db, adminA, (q) => q("select record_reward($1, 5, 'USD', current_date, 'other biz')", [workerC]))).rejects.toThrow(/RECORD_NOT_FOUND/);
+    await expect(asUser(db, adminC, (q) => q("select void_reward($1, '')", [id]))).rejects.toThrow(/REASON_REQUIRED/);
+    await asUser(db, adminC, (q) => q("select void_reward($1, 'entered twice')", [id]));
+    await expect(db.query("delete from employee_rewards where id = $1", [id])).rejects.toThrow(/APPEND_ONLY/);
+    const ev = await db.query<{ event: string }>("select event from account_events where business_id = $1 order by id", [bizC]);
+    expect(ev.rows.map((e) => e.event)).toEqual(["reward_recorded", "reward_voided"]);
+    expect(await asUser(db, adminA, (q) => q("select id from employee_rewards"))).toHaveProperty("rows.length", 0);
+  });
+
+  it("archived employees lose access, cannot be active while archived, and keep history", async () => {
+    await db.query("update memberships set active = false, archived_at = now() where user_id = $1", [workerC]);
+    await expect(db.query("update memberships set active = true where user_id = $1", [workerC])).rejects.toThrow(/memberships_archived_inactive/);
+    await expect(asUser(db, workerC, (q) => q("select record_sale($1, 1, 1, 'USD')", [productC]))).rejects.toThrow(/NOT_A_MEMBER/);
+    const w = (await perf(adminC)).find((x) => x.user_id === workerC)!;
+    expect(w.archived).toBe(true);
+    expect(w.sales_count).toBe(3);
+    expect(Number((await report(adminC)).sales_slsh)).toBe(300000);
+  });
+});

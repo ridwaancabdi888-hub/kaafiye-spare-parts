@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { getFx, getStaffNames, requireMember, type MemberSession } from "@/lib/session";
-import { getLang, getT } from "@/lib/i18n/server";
+import { getDisplayCurrency, getLang, getT } from "@/lib/i18n/server";
 import { listProducts, signedImageUrls } from "@/lib/data";
-import { fmtInt, fmtLongDate, fmtUsd, localDate, monthStart, num, periodRange, rangeToIso } from "@/lib/format";
+import { fmtInt, fmtLongDate, fmtMoney, localDate, monthStart, num, periodRange, pickMoney, rangeToIso, type Currency } from "@/lib/format";
 import type { Product, ReportSummary, Sale } from "@/lib/types";
+import { DisplayCurrencyToggle } from "@/components/DisplayCurrencyToggle";
 import { FxWidget } from "@/components/FxWidget";
 import { Icon, type IconName } from "@/components/Icon";
 import { EmptyState, PageHeader, SectionHeader, StatCard } from "@/components/kit";
@@ -32,7 +33,7 @@ async function shared(s: MemberSession) {
 }
 
 async function AdminDashboard({ s, period }: { s: MemberSession; period: ReturnType<typeof parsePeriod> }) {
-  const [t, lang] = await Promise.all([getT(), getLang()]);
+  const [t, lang, cur] = await Promise.all([getT(), getLang(), getDisplayCurrency()]);
   const range = periodRange(period);
   const [{ fx, products, staff, recent, low, images }, report] = await Promise.all([
     shared(s),
@@ -41,6 +42,10 @@ async function AdminDashboard({ s, period }: { s: MemberSession; period: ReturnT
   const r = (report.data ?? {}) as Partial<ReportSummary>;
   const units = products.reduce((a, p) => a + p.stock_qty, 0);
   const retail = products.reduce((a, p) => a + p.stock_qty * (p.sell_price_usd ?? 0), 0);
+  // Stock is valued today, so its SlSh figure uses the current rate (records use their own saved rate).
+  const rate = fx?.rate?.slsh_per_usd;
+  const retailShown = cur === "SLSH" && rate ? fmtMoney(retail * rate, "SLSH") : fmtMoney(retail, "USD");
+  const expenses = cur === "USD" ? num(r.cash_expenses_usd) + num(r.item_usage_cost_usd) : num(r.cash_expenses_slsh) + num(r.item_usage_cost_slsh);
   const names = Object.fromEntries(products.map((p) => [p.id, p.name]));
 
   return (
@@ -48,15 +53,16 @@ async function AdminDashboard({ s, period }: { s: MemberSession; period: ReturnT
       <PageHeader title={t("dash.greeting", { name: s.membership.full_name.split(" ")[0] })} subtitle={fmtLongDate(new Date(), lang)} />
       <FxWidget rate={fx?.rate ?? null} staleHours={fx?.staleHours ?? 24} canChange />
 
-      <div className="mb-3 flex items-center justify-between gap-3">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <h2 className="section-title">{t("dash.title")}</h2>
+        <DisplayCurrencyToggle value={cur} />
       </div>
       <PeriodChips base="/dashboard" period={period} />
       <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
-        <StatCard icon="cart" label={t("dash.sales")} value={fmtUsd(r.sales_usd)} hint={`${fmtInt(r.sales_count)} ${t("common.records")}`} />
-        <StatCard icon="trending" tone="navy" label={t("dash.profit")} value={fmtUsd(r.gross_profit_usd)} />
-        <StatCard icon="wrench" tone="green" label={t("dash.banjarkaShop")} value={fmtUsd(r.banjarka_shop_usd)} />
-        <StatCard icon="wallet" tone="rose" label={t("dash.expenses")} value={fmtUsd(num(r.cash_expenses_usd) + num(r.item_usage_cost_usd))} />
+        <StatCard icon="cart" label={t("dash.sales")} value={pickMoney(r, "sales", cur)} hint={`${fmtInt(r.sales_count)} ${t("common.records")}`} />
+        <StatCard icon="trending" tone="navy" label={t("dash.profit")} value={pickMoney(r, "gross_profit", cur)} />
+        <StatCard icon="wrench" tone="green" label={t("dash.banjarkaShop")} value={pickMoney(r, "banjarka_shop", cur)} />
+        <StatCard icon="wallet" tone="rose" label={t("dash.expenses")} value={fmtMoney(expenses, cur)} />
       </div>
 
       <SectionHeader title={t("dash.quickActions")} />
@@ -73,7 +79,7 @@ async function AdminDashboard({ s, period }: { s: MemberSession; period: ReturnT
           <div className="grid grid-cols-3 gap-3">
             <Mini label={t("dash.products")} value={fmtInt(products.length)} />
             <Mini label={t("dash.stockUnits")} value={fmtInt(units)} />
-            <Mini label={t("dash.retailValue")} value={fmtUsd(retail)} />
+            <Mini label={t("dash.retailValue")} value={retailShown} />
           </div>
           <SectionHeader title={`${t("dash.lowStockTitle")} (${low.length})`} />
           <LowStock products={low} images={images} empty={t("empty.lowStock")} pcs={t("common.pcs")} />
@@ -92,15 +98,15 @@ async function AdminDashboard({ s, period }: { s: MemberSession; period: ReturnT
 }
 
 async function StaffDashboard({ s }: { s: MemberSession }) {
-  const [t, lang] = await Promise.all([getT(), getLang()]);
+  const [t, lang, cur] = await Promise.all([getT(), getLang(), getDisplayCurrency()]);
   const today = rangeToIso({ from: localDate(), to: localDate() });
   const [{ fx, products, staff, recent, low, images }, mySales, myBj] = await Promise.all([
     shared(s),
-    s.supabase.from("sales").select("total_usd").eq("created_by", s.user.id).eq("status", "active").gte("created_at", today.start!),
-    s.supabase.from("banjarka_records").select("worker_share_usd").eq("created_by", s.user.id).eq("status", "active").gte("work_date", monthStart()),
+    s.supabase.from("sales").select("total, total_usd, currency, fx_slsh_per_usd").eq("created_by", s.user.id).eq("status", "active").gte("created_at", today.start!),
+    s.supabase.from("banjarka_records").select("worker_share, worker_share_usd, currency, fx_slsh_per_usd").eq("created_by", s.user.id).eq("status", "active").gte("work_date", monthStart()),
   ]);
-  const salesToday = (mySales.data ?? []).reduce((a, x) => a + num(x.total_usd), 0);
-  const shareMonth = (myBj.data ?? []).reduce((a, x) => a + num(x.worker_share_usd), 0);
+  const salesToday = (mySales.data ?? []).reduce((a, x) => a + inCurrency(x.total, x.total_usd, x.currency, x.fx_slsh_per_usd, cur), 0);
+  const shareMonth = (myBj.data ?? []).reduce((a, x) => a + inCurrency(x.worker_share, x.worker_share_usd, x.currency, x.fx_slsh_per_usd, cur), 0);
   const names = Object.fromEntries(products.map((p) => [p.id, p.name]));
 
   return (
@@ -108,12 +114,15 @@ async function StaffDashboard({ s }: { s: MemberSession }) {
       <PageHeader title={t("dash.greeting", { name: s.membership.full_name.split(/[\s(]/)[0] })} subtitle={fmtLongDate(new Date(), lang)} />
       <FxWidget rate={fx?.rate ?? null} staleHours={fx?.staleHours ?? 24} canChange={false} />
 
-      <h2 className="section-title mb-3">{t("common.yourWork")}</h2>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="section-title">{t("common.yourWork")}</h2>
+        <DisplayCurrencyToggle value={cur} />
+      </div>
       <div className="grid gap-3 sm:grid-cols-2 sm:gap-4">
         <WorkTile href="/spare-parts" icon="cart" title={t("nav.spareParts")} desc={t("dash.tileSaleDesc")} cta={t("dash.tileSaleCta")}
-          metaLabel={t("dash.mySalesToday")} meta={fmtUsd(salesToday)} />
+          metaLabel={t("dash.mySalesToday")} meta={fmtMoney(salesToday, cur)} />
         <WorkTile href="/banjarka" icon="wrench" title={t("nav.banjarka")} desc={t("dash.tileBjDesc")} cta={t("dash.tileBjCta")}
-          metaLabel={t("dash.myShareMonth")} meta={fmtUsd(shareMonth)} navy />
+          metaLabel={t("dash.myShareMonth")} meta={fmtMoney(shareMonth, cur)} navy />
       </div>
 
       <div className="grid gap-x-6 lg:grid-cols-2">
@@ -128,6 +137,12 @@ async function StaffDashboard({ s }: { s: MemberSession }) {
       </div>
     </>
   );
+}
+
+/** One record in the display currency: its entered amount, or its USD total at the rate saved on it. */
+function inCurrency(native: unknown, usd: unknown, currency: Currency, rate: unknown, cur: Currency) {
+  if (cur === "USD") return num(usd);
+  return currency === "SLSH" ? num(native) : num(usd) * num(rate);
 }
 
 function Quick({ href, icon, label, primary }: { href: string; icon: IconName; label: string; primary?: boolean }) {

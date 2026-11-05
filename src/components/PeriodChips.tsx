@@ -3,7 +3,7 @@ import { getT } from "@/lib/i18n/server";
 import type { Period } from "@/lib/format";
 
 export function parsePeriod(v: string | undefined, fallback: Period = "today"): Period {
-  return v === "today" || v === "month" || v === "all" || v === "custom" ? v : fallback;
+  return v === "today" || v === "week" || v === "month" || v === "all" || v === "custom" ? v : fallback;
 }
 
 /** Period filter: chips scroll horizontally on small phones instead of wrapping the page. */
@@ -16,7 +16,7 @@ export async function PeriodChips({ base, period, from, to, custom = false, extr
   extra?: Record<string, string>;
 }) {
   const t = await getT();
-  const tabs: [Period, string][] = [["today", t("common.today")], ["month", t("common.month")], ["all", t("common.allTime")]];
+  const tabs: [Period, string][] = [["today", t("common.today")], ["week", t("common.week")], ["month", t("common.month")], ["all", t("common.allTime")]];
   const href = (p: Period) => `${base}?${new URLSearchParams({ ...extra, period: p })}`;
   return (
     <div className="min-w-0">

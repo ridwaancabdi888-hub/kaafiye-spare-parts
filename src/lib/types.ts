@@ -11,6 +11,7 @@ export interface Membership {
   username: string | null;
   active: boolean;
   must_change_password?: boolean;
+  archived_at?: string | null;
   created_at: string;
 }
 
@@ -128,6 +129,19 @@ export interface ReportSummary {
   banjarka_worker_usd: number;
   banjarka_shop_usd: number;
   shop_net_usd: number;
+  // SlSh twins: SlSh records at their entered amount, USD records at the rate saved on each record.
+  sales_slsh: number;
+  cogs_slsh: number;
+  gross_profit_slsh: number;
+  cash_expenses_slsh: number;
+  item_usage_cost_slsh: number;
+  spare_parts_net_slsh: number;
+  banjarka_gross_slsh: number;
+  banjarka_expenses_slsh: number;
+  banjarka_net_slsh: number;
+  banjarka_worker_slsh: number;
+  banjarka_shop_slsh: number;
+  shop_net_slsh: number;
   sales_by_currency: Partial<Record<Currency, number>>;
   cash_expenses_by_currency: Partial<Record<Currency, number>>;
   banjarka_gross_by_currency: Partial<Record<Currency, number>>;

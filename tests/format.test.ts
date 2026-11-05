@@ -3,7 +3,7 @@ import { banjarkaSplit, editTimeLeft, EDIT_WINDOW_MS, fmtMoney, fmtSlsh, fmtUsd,
 import { errorKey } from "@/lib/errors";
 import { isValidUsername, usernameToEmail } from "@/lib/staff";
 import { passwordProblem } from "@/lib/password";
-import { fmtDate, fmtDateTime, fmtDuration, fmtLongDate } from "@/lib/format";
+import { fmtDate, fmtDateTime, fmtDuration, fmtLongDate, pickMoney, weekStart } from "@/lib/format";
 import { dictionaries } from "@/lib/i18n/dict";
 
 describe("formatting", () => {
@@ -95,5 +95,20 @@ describe("Somali dates never use English month names", () => {
     expect(fmtLongDate(d, "en")).toBe("Monday, 2 November 2026");
     expect(fmtDuration(3 * 3600000 + 20 * 60000, "so")).toBe("3 saac 20 daq");
     expect(fmtDuration(3 * 3600000 + 20 * 60000, "en")).toBe("3h 20m");
+  });
+});
+
+describe("display currency + work week", () => {
+  it("picks the stored USD or SlSh twin without converting at today's rate", () => {
+    const row = { sales_usd: 6.78, sales_slsh: 80000 };
+    expect(pickMoney(row, "sales", "USD")).toBe("$6.78");
+    expect(pickMoney(row, "sales", "SLSH")).toBe("80,000 SlSh");
+    expect(pickMoney(null, "sales", "SLSH")).toBe("0 SlSh");
+  });
+
+  it("the work week starts on Saturday in Hargeisa time", () => {
+    expect(weekStart(new Date("2026-11-05T09:00:00Z"))).toBe("2026-10-31"); // Thursday → Saturday
+    expect(weekStart(new Date("2026-10-31T09:00:00Z"))).toBe("2026-10-31"); // Saturday itself
+    expect(weekStart(new Date("2026-11-06T22:30:00Z"))).toBe("2026-11-07"); // 01:30 Saturday local
   });
 });

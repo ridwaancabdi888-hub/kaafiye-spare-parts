@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { getStaffNames, requireAdmin } from "@/lib/session";
-import { getLang, getT } from "@/lib/i18n/server";
-import { fmtDateTime, fmtInt, fmtMoney, fmtUsd, periodRange, rangeToIso, type Currency } from "@/lib/format";
+import { getDisplayCurrency, getLang, getT } from "@/lib/i18n/server";
+import { fmtDateTime, fmtInt, fmtMoney, periodRange, pickMoney, rangeToIso, type Currency } from "@/lib/format";
 import type { DictKey } from "@/lib/i18n/dict";
 import type { ReportSummary, Revision } from "@/lib/types";
+import { DisplayCurrencyToggle } from "@/components/DisplayCurrencyToggle";
 import { Icon } from "@/components/Icon";
 import { Alert, DataTable, EmptyState, PageHeader, SectionHeader, StatCard } from "@/components/kit";
 import { PeriodChips, parsePeriod } from "@/components/PeriodChips";
@@ -15,7 +16,7 @@ const ACTION_BADGE = { create: "badge-slate", edit: "badge-green", correction: "
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ period?: string; from?: string; to?: string }> }) {
   const s = await requireAdmin();
   const sp = await searchParams;
-  const [t, lang] = await Promise.all([getT(), getLang()]);
+  const [t, lang, cur] = await Promise.all([getT(), getLang(), getDisplayCurrency()]);
   const period = parsePeriod(sp.period, "month");
   const range = periodRange(period, sp.from, sp.to);
   const iso = rangeToIso(range);
@@ -38,13 +39,13 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
 
   return (
     <>
-      <PageHeader title={t("rep.title")} subtitle={t("rep.subtitle")} />
+      <PageHeader title={t("rep.title")} subtitle={t("rep.subtitle")} actions={<DisplayCurrencyToggle value={cur} />} />
       <PeriodChips base="/reports" period={period} from={range.from} to={range.to} custom />
 
       <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard icon="cart" label={t("rep.salesRevenue")} value={fmtUsd(r.sales_usd)} hint={`${fmtInt(r.sales_count)} ${t("common.records")} · ${fmtInt(r.units_sold)} ${t("common.pcs")}`} />
-        <StatCard icon="trending" tone="navy" label={t("rep.grossProfit")} value={fmtUsd(r.gross_profit_usd)} />
-        <StatCard icon="wrench" label={t("rep.bjShop")} value={fmtUsd(r.banjarka_shop_usd)} />
+        <StatCard icon="cart" label={t("rep.salesRevenue")} value={pickMoney(r, "sales", cur)} hint={`${fmtInt(r.sales_count)} ${t("common.records")} · ${fmtInt(r.units_sold)} ${t("common.pcs")}`} />
+        <StatCard icon="trending" tone="navy" label={t("rep.grossProfit")} value={pickMoney(r, "gross_profit", cur)} />
+        <StatCard icon="wrench" label={t("rep.bjShop")} value={pickMoney(r, "banjarka_shop", cur)} />
         <StatCard icon="pencil" tone="amber" label={t("dash.editedRecords")} value={fmtInt(r.edited_count)} />
       </div>
       {(zc.count ?? 0) > 0 && <Alert tone="warning" className="mt-4">{t("rep.zeroCost", { n: zc.count ?? 0 })}</Alert>}
@@ -52,21 +53,21 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <section className="card">
           <h2 className="section-title mb-2 flex items-center gap-2"><Icon name="cart" className="h-5 w-5 text-brand-600" /> {t("rep.spareParts")}</h2>
-          <Line label={t("rep.salesRevenue")} value={fmtUsd(r.sales_usd)} />
-          <Line label={t("rep.cogs")} value={`− ${fmtUsd(r.cogs_usd)}`} />
-          <Line label={t("rep.grossProfit")} value={fmtUsd(r.gross_profit_usd)} strong />
-          <Line label={t("rep.cashExpenses")} value={`− ${fmtUsd(r.cash_expenses_usd)}`} />
-          <Line label={t("rep.itemUsage")} value={`− ${fmtUsd(r.item_usage_cost_usd)}`} />
-          <Line label={t("rep.spNet")} value={fmtUsd(r.spare_parts_net_usd)} strong green />
+          <Line label={t("rep.salesRevenue")} value={pickMoney(r, "sales", cur)} />
+          <Line label={t("rep.cogs")} value={`− ${pickMoney(r, "cogs", cur)}`} />
+          <Line label={t("rep.grossProfit")} value={pickMoney(r, "gross_profit", cur)} strong />
+          <Line label={t("rep.cashExpenses")} value={`− ${pickMoney(r, "cash_expenses", cur)}`} />
+          <Line label={t("rep.itemUsage")} value={`− ${pickMoney(r, "item_usage_cost", cur)}`} />
+          <Line label={t("rep.spNet")} value={pickMoney(r, "spare_parts_net", cur)} strong green />
           <p className="hint mt-2">{t("rep.byCurrency")}: {byCur(r.sales_by_currency)} · {t("exp.cash")}: {byCur(r.cash_expenses_by_currency)}</p>
         </section>
         <section className="card">
           <h2 className="section-title mb-2 flex items-center gap-2"><Icon name="wrench" className="h-5 w-5 text-brand-600" /> {t("rep.banjarka")} <span className="badge badge-slate">{fmtInt(r.banjarka_count)}</span></h2>
-          <Line label={t("rep.bjGross")} value={fmtUsd(r.banjarka_gross_usd)} />
-          <Line label={t("rep.bjExpenses")} value={`− ${fmtUsd(r.banjarka_expenses_usd)}`} />
-          <Line label={t("rep.bjNet")} value={fmtUsd(r.banjarka_net_usd)} strong />
-          <Line label={t("rep.bjWorker")} value={fmtUsd(r.banjarka_worker_usd)} />
-          <Line label={t("rep.bjShop")} value={fmtUsd(r.banjarka_shop_usd)} strong green />
+          <Line label={t("rep.bjGross")} value={pickMoney(r, "banjarka_gross", cur)} />
+          <Line label={t("rep.bjExpenses")} value={`− ${pickMoney(r, "banjarka_expenses", cur)}`} />
+          <Line label={t("rep.bjNet")} value={pickMoney(r, "banjarka_net", cur)} strong />
+          <Line label={t("rep.bjWorker")} value={pickMoney(r, "banjarka_worker", cur)} />
+          <Line label={t("rep.bjShop")} value={pickMoney(r, "banjarka_shop", cur)} strong green />
           <p className="hint mt-2">{t("rep.byCurrency")}: {byCur(r.banjarka_gross_by_currency)}</p>
         </section>
       </div>
@@ -76,7 +77,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           <div className="font-bold">{t("rep.shopNet")}</div>
           <div className="text-[13px] text-white/70">{t("rep.shopNetHint")}</div>
         </div>
-        <div className="num text-[30px] font-extrabold">{fmtUsd(r.shop_net_usd)}</div>
+        <div className="num text-[30px] font-extrabold">{pickMoney(r, "shop_net", cur)}</div>
       </div>
       <p className="hint mt-2">{t("rep.usdNote")}</p>
 

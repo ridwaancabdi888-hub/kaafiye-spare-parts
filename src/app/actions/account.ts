@@ -20,8 +20,8 @@ const str = (f: FormData, k: string) => {
 const fail = (error: DictKey): ActionState => ({ error, at: Date.now() });
 const done = (id?: string): ActionState => ({ ok: true, id, at: Date.now() });
 
-type Target = { user_id: string; business_id: string; role: "admin" | "user"; username: string | null; full_name: string };
-type EventName = "account_created" | "password_reset" | "password_changed" | "disabled" | "enabled" | "username_set";
+type Target = { user_id: string; business_id: string; role: "admin" | "user"; username: string | null; full_name: string; archived_at: string | null };
+type EventName = "account_created" | "password_reset" | "password_changed" | "disabled" | "enabled" | "username_set" | "archived" | "restored";
 
 async function logEvent(admin: SupabaseClient, s: Session, businessId: string | null, target: { id: string; name: string },
   event: EventName, detail: Record<string, unknown> = {}) {
@@ -33,14 +33,17 @@ async function logEvent(admin: SupabaseClient, s: Session, businessId: string | 
 
 /**
  * Who may manage whom: the super admin manages any business account; a business admin manages
- * staff (role "user") of their own business. Nobody manages their own account here.
+ * staff (role "user") of their own business. Nobody manages their own account here, and super admin
+ * accounts are never managed from these screens.
  */
 async function manageable(userId: string): Promise<{ s: Session; admin: SupabaseClient; target: Target } | null> {
   const s = await getSession();
   if (!s || !userId || userId === s.user.id || !(s.isSuper || s.isAdmin)) return null;
   const admin = createAdminClient();
-  const { data } = await admin.from("memberships").select("user_id, business_id, role, username, full_name").eq("user_id", userId).maybeSingle<Target>();
+  const { data } = await admin.from("memberships").select("user_id, business_id, role, username, full_name, archived_at").eq("user_id", userId).maybeSingle<Target>();
   if (!data) return null;
+  const { data: superRow } = await admin.from("super_admins").select("user_id").eq("user_id", userId).maybeSingle();
+  if (superRow) return null;
   if (s.isSuper) return { s, admin, target: data };
   if (s.isAdmin && data.business_id === s.membership?.business_id && data.role === "user") return { s, admin, target: data };
   return null;
@@ -144,11 +147,44 @@ export async function resetPassword(_: ActionState, f: FormData): Promise<Action
 export async function setAccountActive(userId: string, active: boolean): Promise<ActionState> {
   const m = await manageable(userId);
   if (!m) return fail("err.ADMIN_ONLY");
+  if (m.target.archived_at) return fail("err.ACCOUNT_ARCHIVED");
   const { error } = await m.admin.from("memberships").update({ active }).eq("user_id", userId);
   if (error) return fail(errorKey(error));
   // Also block sign-in at the auth layer (RLS already denies data access once inactive).
   await m.admin.auth.admin.updateUserById(userId, { ban_duration: active ? "none" : "876000h" });
   await logEvent(m.admin, m.s, m.target.business_id, { id: userId, name: m.target.full_name }, active ? "enabled" : "disabled");
+  revalidatePath("/users");
+  revalidatePath("/super");
+  return done(userId);
+}
+
+/**
+ * "Remove employee": ends their employment without deleting anything. The account is disabled and
+ * blocked from signing in; their sales, Banjarka, expenses and audit history stay as they are.
+ */
+export async function archiveAccount(userId: string): Promise<ActionState> {
+  const m = await manageable(userId);
+  if (!m) return fail("err.ADMIN_ONLY");
+  if (m.target.archived_at) return done(userId);
+  const { error } = await m.admin.from("memberships")
+    .update({ active: false, archived_at: new Date().toISOString(), archived_by: m.s.user.id }).eq("user_id", userId);
+  if (error) return fail(errorKey(error));
+  await m.admin.auth.admin.updateUserById(userId, { ban_duration: "876000h" });
+  await logEvent(m.admin, m.s, m.target.business_id, { id: userId, name: m.target.full_name }, "archived");
+  revalidatePath("/users");
+  revalidatePath("/super");
+  return done(userId);
+}
+
+/** Bring an archived employee back as an active account. */
+export async function restoreAccount(userId: string): Promise<ActionState> {
+  const m = await manageable(userId);
+  if (!m) return fail("err.ADMIN_ONLY");
+  if (!m.target.archived_at) return done(userId);
+  const { error } = await m.admin.from("memberships").update({ active: true, archived_at: null, archived_by: null }).eq("user_id", userId);
+  if (error) return fail(errorKey(error));
+  await m.admin.auth.admin.updateUserById(userId, { ban_duration: "none" });
+  await logEvent(m.admin, m.s, m.target.business_id, { id: userId, name: m.target.full_name }, "restored");
   revalidatePath("/users");
   revalidatePath("/super");
   return done(userId);

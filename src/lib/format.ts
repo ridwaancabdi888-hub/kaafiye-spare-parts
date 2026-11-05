@@ -20,6 +20,15 @@ export const fmtUsdPrecise = (v: unknown) => usdPreciseFmt.format(num(v));
 /** 118,000 SlSh */
 export const fmtSlsh = (v: unknown) => `${(Math.abs(num(v) % 1) > 0 ? numFmt : intFmt).format(num(v))} SlSh`;
 export const fmtMoney = (v: unknown, c: Currency) => (c === "USD" ? fmtUsd(v) : fmtSlsh(v));
+export const DISPLAY_CURRENCY_COOKIE = "kaafiye_cur";
+
+/**
+ * Display-only pick between a stored USD total and its SlSh twin (`<key>_usd` / `<key>_slsh`).
+ * Both come from each record's own saved rate, so a later rate change never alters them.
+ */
+export function pickMoney(row: object | null | undefined, key: string, c: Currency) {
+  return fmtMoney((row as Record<string, unknown> | null | undefined)?.[`${key}_${c === "USD" ? "usd" : "slsh"}`], c);
+}
 export const fmtInt = (v: unknown) => intFmt.format(num(v));
 export const fmtNum = (v: unknown) => numFmt.format(num(v));
 
@@ -97,10 +106,19 @@ export function monthStart(d = new Date()) {
   return `${localDate(d).slice(0, 7)}-01`;
 }
 
-export type Period = "today" | "month" | "all" | "custom";
+/** Saturday that starts the current Hargeisa work week (Saturday–Friday). */
+export function weekStart(d = new Date()) {
+  const today = localDate(d);
+  const noon = new Date(`${today}T12:00:00+03:00`);
+  const back = (noon.getUTCDay() + 1) % 7; // Sat → 0, Sun → 1, … Fri → 6
+  return localDate(new Date(noon.getTime() - back * 86400000));
+}
+
+export type Period = "today" | "week" | "month" | "all" | "custom";
 export function periodRange(period: Period, from?: string, to?: string): { from: string | null; to: string | null } {
   const today = localDate();
   if (period === "today") return { from: today, to: today };
+  if (period === "week") return { from: weekStart(), to: today };
   if (period === "month") return { from: monthStart(), to: today };
   if (period === "custom") {
     const ok = (s?: string) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null);
