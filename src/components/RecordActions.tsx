@@ -1,5 +1,5 @@
 "use client";
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useId, useState } from "react";
 import { updateBanjarka, updateExpense, updateSale, voidRecord } from "@/app/actions/records";
 import { useLang, useT } from "@/lib/i18n/client";
 import { banjarkaSplit, editTimeLeft, fmtDuration, fmtMoney, num, type Currency } from "@/lib/format";
@@ -66,10 +66,11 @@ export function RecordActions({ isOwn, isAdmin, ...p }: Props & { isOwn: boolean
 
 function ReasonField({ required }: { required: boolean }) {
   const t = useT();
+  const id = useId();
   return (
     <div className="field">
-      <label className="label">{required ? t("common.editReason") : t("common.editReasonOptional")}</label>
-      <input name="edit_reason" className="input" required={required} minLength={required ? 3 : undefined} />
+      <label className="label" htmlFor={id}>{required ? t("common.editReason") : t("common.editReasonOptional")}</label>
+      <input id={id} name="edit_reason" className="input" required={required} minLength={required ? 3 : undefined} />
     </div>
   );
 }
@@ -93,18 +94,19 @@ function SaleEdit({ record, reasonRequired, onDone }: { record: Sale; reasonRequ
   const [qty, setQty] = useState(String(record.quantity));
   const [price, setPrice] = useState(String(num(record.unit_price)));
   const [cur, setCur] = useState<Currency>(record.currency);
+  const id = useId();
   useCloseOnOk(state, onDone);
   return (
     <form action={action}>
       <input type="hidden" name="id" value={record.id} />
       <input type="hidden" name="note" value={record.note ?? ""} />
       <div className="field">
-        <label className="label">{t("common.quantity")}</label>
-        <QtyStepper value={qty} onChange={setQty} />
+        <label className="label" htmlFor={`${id}-qty`}>{t("common.quantity")}</label>
+        <QtyStepper id={`${id}-qty`} value={qty} onChange={setQty} />
       </div>
       <div className="field">
-        <label className="label">{t("sp.unitPrice")}</label>
-        <input name="unit_price" className="input num" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value.replace(/[^0-9.,]/g, ""))} />
+        <label className="label" htmlFor={`${id}-price`}>{t("sp.unitPrice")}</label>
+        <input id={`${id}-price`} name="unit_price" className="input num" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value.replace(/[^0-9.,]/g, ""))} />
       </div>
       <div className="field">
         <label className="label">{t("common.currency")}</label>
@@ -125,6 +127,7 @@ function ExpenseEdit({ record, reasonRequired, onDone }: { record: Expense; reas
   const t = useT();
   const [state, action] = useActionState(updateExpense, undefined);
   const [qty, setQty] = useState(String(record.quantity ?? 1));
+  const id = useId();
   useCloseOnOk(state, onDone);
   return (
     <form action={action}>
@@ -132,8 +135,8 @@ function ExpenseEdit({ record, reasonRequired, onDone }: { record: Expense; reas
       {record.kind === "cash" ? (
         <>
           <div className="field">
-            <label className="label">{t("common.amount")}</label>
-            <input name="amount" className="input num" inputMode="decimal" defaultValue={num(record.amount)} />
+            <label className="label" htmlFor={`${id}-amount`}>{t("common.amount")}</label>
+            <input id={`${id}-amount`} name="amount" className="input num" inputMode="decimal" defaultValue={num(record.amount)} />
           </div>
           <div className="field">
             <label className="label">{t("common.currency")}</label>
@@ -142,13 +145,13 @@ function ExpenseEdit({ record, reasonRequired, onDone }: { record: Expense; reas
         </>
       ) : (
         <div className="field">
-          <label className="label">{t("common.quantity")}</label>
-          <QtyStepper value={qty} onChange={setQty} />
+          <label className="label" htmlFor={`${id}-qty`}>{t("common.quantity")}</label>
+          <QtyStepper id={`${id}-qty`} value={qty} onChange={setQty} />
         </div>
       )}
       <div className="field">
-        <label className="label">{t("common.reason")}</label>
-        <input name="reason" className="input" defaultValue={record.reason} required minLength={3} />
+        <label className="label" htmlFor={`${id}-reason`}>{t("common.reason")}</label>
+        <input id={`${id}-reason`} name="reason" className="input" defaultValue={record.reason} required minLength={3} />
       </div>
       <div className="mt-4"><ReasonField required={reasonRequired} /></div>
       <SubmitButton className="btn btn-block mt-5">{t("common.save")}</SubmitButton>
@@ -164,6 +167,7 @@ function BanjarkaEdit({ record, reasonRequired, onDone }: { record: BanjarkaReco
   const [exp, setExp] = useState(String(num(record.expenses)));
   const [cur, setCur] = useState<Currency>(record.currency);
   const split = banjarkaSplit(num(gross.replace(/,/g, "")), num(exp.replace(/,/g, "")));
+  const id = useId();
   useCloseOnOk(state, onDone);
   return (
     <form action={action}>
@@ -171,17 +175,17 @@ function BanjarkaEdit({ record, reasonRequired, onDone }: { record: BanjarkaReco
       <input type="hidden" name="note" value={record.note ?? ""} />
       <div className="grid grid-cols-2 gap-3">
         <div className="min-w-0">
-          <label className="label">{t("bj.gross")}</label>
-          <input name="gross" className="input num" inputMode="decimal" value={gross} onChange={(e) => setGross(e.target.value.replace(/[^0-9.,]/g, ""))} />
+          <label className="label" htmlFor={`${id}-gross`}>{t("bj.gross")}</label>
+          <input id={`${id}-gross`} name="gross" className="input num" inputMode="decimal" value={gross} onChange={(e) => setGross(e.target.value.replace(/[^0-9.,]/g, ""))} />
         </div>
         <div className="min-w-0">
-          <label className="label">{t("bj.expenses")}</label>
-          <input name="expenses" className="input num" inputMode="decimal" value={exp} onChange={(e) => setExp(e.target.value.replace(/[^0-9.,]/g, ""))} />
+          <label className="label" htmlFor={`${id}-expenses`}>{t("bj.expenses")}</label>
+          <input id={`${id}-expenses`} name="expenses" className="input num" inputMode="decimal" value={exp} onChange={(e) => setExp(e.target.value.replace(/[^0-9.,]/g, ""))} />
         </div>
       </div>
       <div className="field mt-4">
-        <label className="label">{t("bj.expenseReason")}</label>
-        <input name="expense_reason" className="input" defaultValue={record.expense_reason ?? ""} />
+        <label className="label" htmlFor={`${id}-expense-reason`}>{t("bj.expenseReason")}</label>
+        <input id={`${id}-expense-reason`} name="expense_reason" className="input" defaultValue={record.expense_reason ?? ""} />
       </div>
       <div className="field">
         <label className="label">{t("common.currency")}</label>

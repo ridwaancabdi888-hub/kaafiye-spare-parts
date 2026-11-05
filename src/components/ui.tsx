@@ -80,7 +80,8 @@ export function CurrencyToggle({ name = "currency", value, onChange, defaultValu
   );
 }
 
-export function QtyStepper({ name = "quantity", value, onChange, max }: {
+export function QtyStepper({ id, name = "quantity", value, onChange, max }: {
+  id?: string;
   name?: string;
   value: string;
   onChange: (v: string) => void;
@@ -95,6 +96,7 @@ export function QtyStepper({ name = "quantity", value, onChange, max }: {
         <Icon name="minus" className="mx-auto h-5 w-5" />
       </button>
       <input
+        id={id}
         name={name}
         inputMode="numeric"
         aria-label={t("common.quantity")}

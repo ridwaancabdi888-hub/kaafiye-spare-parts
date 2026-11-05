@@ -1,5 +1,5 @@
 "use client";
-import { useActionState, useRef, useState, useTransition } from "react";
+import { useActionState, useId, useRef, useState, useTransition } from "react";
 import { adjustStock, setProductStatus } from "@/app/actions/admin";
 import { useT } from "@/lib/i18n/client";
 import { Icon } from "@/components/Icon";
@@ -10,6 +10,7 @@ export function StockAdjustForm({ productId }: { productId: string }) {
   const [state, action] = useActionState(adjustStock, undefined);
   const [kind, setKind] = useState<"opening" | "purchase" | "adjustment">("purchase");
   const ref = useRef<HTMLFormElement>(null);
+  const id = useId();
   useResetOnSuccess(state, ref);
   return (
     <form action={action} ref={ref} className="card">
@@ -27,18 +28,18 @@ export function StockAdjustForm({ productId }: { productId: string }) {
         ))}
       </div>
       <div className="field mt-4">
-        <label className="label">{t("inv.qtyChange")}</label>
-        <input name="qty_change" className="input num" inputMode={kind === "adjustment" ? "text" : "numeric"} placeholder={kind === "adjustment" ? "-2 / 3" : "10"} required />
+        <label className="label" htmlFor={`${id}-qty`}>{t("inv.qtyChange")}</label>
+        <input id={`${id}-qty`} name="qty_change" className="input num" inputMode={kind === "adjustment" ? "text" : "numeric"} placeholder={kind === "adjustment" ? "-2 / 3" : "10"} required />
       </div>
       {kind !== "adjustment" && (
         <div className="field">
-          <label className="label">{t("inv.unitCostOptional")}</label>
-          <input name="unit_cost_usd" className="input num" inputMode="decimal" />
+          <label className="label" htmlFor={`${id}-cost`}>{t("inv.unitCostOptional")}</label>
+          <input id={`${id}-cost`} name="unit_cost_usd" className="input num" inputMode="decimal" />
         </div>
       )}
       <div className="field">
-        <label className="label">{kind === "adjustment" ? t("common.reason") : t("common.note")}</label>
-        <input name="note" className="input" required={kind === "adjustment"} minLength={kind === "adjustment" ? 3 : undefined} />
+        <label className="label" htmlFor={`${id}-note`}>{kind === "adjustment" ? t("common.reason") : t("common.note")}</label>
+        <input id={`${id}-note`} name="note" className="input" required={kind === "adjustment"} minLength={kind === "adjustment" ? 3 : undefined} />
       </div>
       <SubmitButton className="btn btn-block mt-5">{t("common.save")}</SubmitButton>
       <FormMessage state={state} />
