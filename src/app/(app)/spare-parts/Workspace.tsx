@@ -1,5 +1,5 @@
 "use client";
-import { useActionState, useMemo, useRef, useState } from "react";
+import { useActionState, useId, useMemo, useRef, useState } from "react";
 import { recordCashExpense, recordItemExpense, recordSale } from "@/app/actions/records";
 import { useT } from "@/lib/i18n/client";
 import { fmtInt, fmtMoney, fmtSlsh, fmtUsd, fmtUsdPrecise, num, type Currency } from "@/lib/format";
@@ -82,6 +82,7 @@ function SalePanel({ products, images, rate }: { products: Product[]; images: Re
   const [cur, setCur] = useState<Currency>("USD");
   const [state, action] = useActionState(recordSale, undefined);
   const formRef = useRef<HTMLFormElement>(null);
+  const qtyId = useId();
   useResetOnSuccess(state, formRef, () => {
     setProductId("");
     setQty("1");
@@ -127,8 +128,8 @@ function SalePanel({ products, images, rate }: { products: Product[]; images: Re
 
             <div className="mt-4 grid grid-cols-2 gap-3">
               <div className="min-w-0">
-                <label className="label">{t("common.quantity")}</label>
-                <QtyStepper value={qty} onChange={setQty} max={selected.stock_qty} />
+                <label className="label" htmlFor={qtyId}>{t("common.quantity")}</label>
+                <QtyStepper id={qtyId} value={qty} onChange={setQty} max={selected.stock_qty} />
               </div>
               <div className="min-w-0">
                 <label className="label">{t("common.currency")}</label>
@@ -189,20 +190,21 @@ function CashForm() {
   const t = useT();
   const [state, action] = useActionState(recordCashExpense, undefined);
   const ref = useRef<HTMLFormElement>(null);
+  const id = useId();
   useResetOnSuccess(state, ref);
   return (
     <form action={action} ref={ref}>
       <div className="field">
-        <label className="label">{t("common.amount")}</label>
-        <input name="amount" className="input input-lg num" inputMode="decimal" placeholder="0" required />
+        <label className="label" htmlFor={`${id}-amount`}>{t("common.amount")}</label>
+        <input id={`${id}-amount`} name="amount" className="input input-lg num" inputMode="decimal" placeholder="0" required />
       </div>
       <div className="field">
         <label className="label">{t("common.currency")}</label>
         <CurrencyToggle />
       </div>
       <div className="field">
-        <label className="label">{t("common.reason")}</label>
-        <input name="reason" className="input" required minLength={3} />
+        <label className="label" htmlFor={`${id}-reason`}>{t("common.reason")}</label>
+        <input id={`${id}-reason`} name="reason" className="input" required minLength={3} />
       </div>
       <SubmitButton className="btn btn-block mt-5">{t("sp.saveExpense")}</SubmitButton>
       <FormMessage state={state} />
@@ -216,6 +218,7 @@ function ItemForm({ products }: { products: Product[] }) {
   const [pid, setPid] = useState("");
   const [qty, setQty] = useState("1");
   const ref = useRef<HTMLFormElement>(null);
+  const id = useId();
   useResetOnSuccess(state, ref, () => {
     setPid("");
     setQty("1");
@@ -224,8 +227,8 @@ function ItemForm({ products }: { products: Product[] }) {
   return (
     <form action={action} ref={ref}>
       <div className="field">
-        <label className="label">{t("sp.pickProduct")}</label>
-        <select name="product_id" className="input" value={pid} onChange={(e) => setPid(e.target.value)} required>
+        <label className="label" htmlFor={`${id}-product`}>{t("sp.pickProduct")}</label>
+        <select id={`${id}-product`} name="product_id" className="input" value={pid} onChange={(e) => setPid(e.target.value)} required>
           <option value="">—</option>
           {products.map((x) => (
             <option key={x.id} value={x.id} disabled={x.stock_qty <= 0}>{x.name} ({fmtInt(x.stock_qty)})</option>
@@ -233,12 +236,12 @@ function ItemForm({ products }: { products: Product[] }) {
         </select>
       </div>
       <div className="field">
-        <label className="label">{t("common.quantity")}</label>
-        <QtyStepper value={qty} onChange={setQty} max={p?.stock_qty} />
+        <label className="label" htmlFor={`${id}-qty`}>{t("common.quantity")}</label>
+        <QtyStepper id={`${id}-qty`} value={qty} onChange={setQty} max={p?.stock_qty} />
       </div>
       <div className="field">
-        <label className="label">{t("common.reason")}</label>
-        <input name="reason" className="input" required minLength={3} />
+        <label className="label" htmlFor={`${id}-reason`}>{t("common.reason")}</label>
+        <input id={`${id}-reason`} name="reason" className="input" required minLength={3} />
       </div>
       {p && <p className="hint mt-3">{t("sp.itemValue", { v: fmtUsdPrecise(num(qty) * p.cost_usd) })}</p>}
       <SubmitButton className="btn btn-block mt-5">{t("sp.saveExpense")}</SubmitButton>
