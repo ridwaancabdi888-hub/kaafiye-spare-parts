@@ -8,6 +8,10 @@ returns numeric language sql immutable as $$
   select case when p_currency = 'SLSH' then p_native else p_usd * p_rate end;
 $$;
 
+-- ───────── Unconfirmed purchase costs ─────────
+-- A cost the owner has not confirmed yet is flagged, so profit built on it is shown as uncertain.
+alter table public.products add column cost_confirmed boolean not null default true;
+
 -- ───────── Employee archive (removed from active employment; history is kept) ─────────
 alter table public.memberships add column archived_at timestamptz;
 alter table public.memberships add column archived_by uuid;

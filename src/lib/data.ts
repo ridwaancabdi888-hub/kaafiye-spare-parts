@@ -15,6 +15,20 @@ export async function listProducts(supabase: SupabaseClient, businessId: string,
   }));
 }
 
+/**
+ * Active sales whose profit is uncertain: sold with no cost price, or of a product whose cost the
+ * owner has not confirmed yet. Their gross profit must not be read as exact.
+ */
+export async function uncertainCostSales(supabase: SupabaseClient, businessId: string, iso: { start: string | null; end: string | null }) {
+  const { data: unconfirmed } = await supabase.from("products").select("id").eq("business_id", businessId).eq("cost_confirmed", false);
+  const ids = (unconfirmed ?? []).map((p) => p.id as string);
+  let q = supabase.from("sales").select("id", { count: "exact", head: true }).eq("business_id", businessId).eq("status", "active")
+    .or(ids.length ? `unit_cost_usd.eq.0,product_id.in.(${ids.join(",")})` : "unit_cost_usd.eq.0");
+  if (iso.start) q = q.gte("created_at", iso.start);
+  if (iso.end) q = q.lt("created_at", iso.end);
+  return (await q).count ?? 0;
+}
+
 /** Short-lived signed URLs for private product images (bucket is not public). */
 export async function signedImageUrls(supabase: SupabaseClient, paths: (string | null)[]) {
   const list = [...new Set(paths.filter((p): p is string => Boolean(p)))];

@@ -107,6 +107,10 @@ export function ProductForm({ product, imageUrl, businessId }: { product?: Produ
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label={t("inv.sellUsd")} name="sell_price_usd" defaultValue={product?.sell_price_usd != null ? String(product.sell_price_usd) : ""} inputMode="decimal" />
             <Field label={t("inv.costUsd")} name="cost_usd" defaultValue={product && product.cost_usd > 0 ? String(product.cost_usd) : ""} inputMode="decimal" placeholder="0" />
+            <label className="flex min-h-12 items-center gap-3 rounded-xl border border-line px-3 sm:col-span-2">
+              <input type="checkbox" name="cost_confirmed" defaultChecked={product?.cost_confirmed ?? true} className="h-5 w-5 accent-brand-600" />
+              <span className="text-[14px] font-semibold">{t("inv.costConfirmed")}</span>
+            </label>
             <Field label={t("inv.lowThreshold")} name="low_stock_threshold" defaultValue={String(product?.low_stock_threshold ?? 3)} inputMode="numeric" />
             <Field label={t("inv.unit")} name="unit" defaultValue={product?.unit ?? "PCS"} />
             {!product && <Field label={t("inv.openingStock")} name="opening_stock" defaultValue="" inputMode="numeric" placeholder="0" />}

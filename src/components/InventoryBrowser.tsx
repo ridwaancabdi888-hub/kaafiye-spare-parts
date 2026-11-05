@@ -73,8 +73,9 @@ export function InventoryBrowser({ products, images, canEdit }: { products: Prod
                       {p.sell_price_usd !== null ? t("inv.price", { v: fmtUsd(p.sell_price_usd) }) : <span className="text-muted">{t("inv.priceNotSet")}</span>}
                     </div>
                     {canEdit && (
-                      <div className={`num text-[12px] ${p.cost_usd > 0 ? "text-muted" : "font-semibold text-amber-700"}`}>
-                        {p.cost_usd > 0 ? t("inv.cost", { v: fmtUsdPrecise(p.cost_usd) }) : t("inv.costNotSet")}
+                      <div className={`num text-[12px] ${p.cost_usd > 0 && p.cost_confirmed ? "text-muted" : "font-semibold text-amber-700"}`}>
+                        {p.cost_usd <= 0 ? t("inv.costNotSet") : p.cost_confirmed ? t("inv.cost", { v: fmtUsdPrecise(p.cost_usd) })
+                          : t("inv.costUnconfirmed", { v: fmtUsdPrecise(p.cost_usd) })}
                       </div>
                     )}
                   </div>

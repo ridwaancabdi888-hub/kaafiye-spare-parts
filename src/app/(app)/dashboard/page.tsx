@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getFx, getStaffNames, requireMember, type MemberSession } from "@/lib/session";
 import { getDisplayCurrency, getLang, getT } from "@/lib/i18n/server";
-import { listProducts, signedImageUrls } from "@/lib/data";
+import { listProducts, signedImageUrls, uncertainCostSales } from "@/lib/data";
 import { fmtInt, fmtLongDate, fmtMoney, localDate, monthStart, num, periodRange, pickMoney, rangeToIso, type Currency } from "@/lib/format";
 import type { Product, ReportSummary, Sale } from "@/lib/types";
 import { DisplayCurrencyToggle } from "@/components/DisplayCurrencyToggle";
@@ -35,9 +35,10 @@ async function shared(s: MemberSession) {
 async function AdminDashboard({ s, period }: { s: MemberSession; period: ReturnType<typeof parsePeriod> }) {
   const [t, lang, cur] = await Promise.all([getT(), getLang(), getDisplayCurrency()]);
   const range = periodRange(period);
-  const [{ fx, products, staff, recent, low, images }, report] = await Promise.all([
+  const [{ fx, products, staff, recent, low, images }, report, uncertain] = await Promise.all([
     shared(s),
     s.supabase.rpc("report_summary", { p_from: range.from, p_to: range.to }),
+    uncertainCostSales(s.supabase, s.business.id, rangeToIso(range)),
   ]);
   const r = (report.data ?? {}) as Partial<ReportSummary>;
   const units = products.reduce((a, p) => a + p.stock_qty, 0);
@@ -60,7 +61,8 @@ async function AdminDashboard({ s, period }: { s: MemberSession; period: ReturnT
       <PeriodChips base="/dashboard" period={period} />
       <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
         <StatCard icon="cart" label={t("dash.sales")} value={pickMoney(r, "sales", cur)} hint={`${fmtInt(r.sales_count)} ${t("common.records")}`} />
-        <StatCard icon="trending" tone="navy" label={t("dash.profit")} value={pickMoney(r, "gross_profit", cur)} />
+        <StatCard icon="trending" tone="navy" label={t("dash.profit")} value={pickMoney(r, "gross_profit", cur)}
+          hint={uncertain > 0 ? t("dash.profitUncertain", { n: uncertain }) : undefined} />
         <StatCard icon="wrench" tone="green" label={t("dash.banjarkaShop")} value={pickMoney(r, "banjarka_shop", cur)} />
         <StatCard icon="wallet" tone="rose" label={t("dash.expenses")} value={fmtMoney(expenses, cur)} />
       </div>

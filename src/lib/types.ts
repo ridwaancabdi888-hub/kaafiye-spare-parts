@@ -37,6 +37,7 @@ export interface Product {
   unit: string;
   stock_qty: number;
   cost_usd: number;
+  cost_confirmed: boolean;
   sell_price_usd: number | null;
   supplier: string | null;
   low_stock_threshold: number;

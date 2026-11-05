@@ -40,6 +40,7 @@ function productFields(f: FormData) {
     condition: condition === "new" || condition === "used" ? condition : null,
     unit: str(f, "unit") || "PCS",
     cost_usd: cost ?? 0,
+    cost_confirmed: f.get("cost_confirmed") === "on",
     sell_price_usd: sell,
     supplier: str(f, "supplier") || null,
     low_stock_threshold: low ?? 3,

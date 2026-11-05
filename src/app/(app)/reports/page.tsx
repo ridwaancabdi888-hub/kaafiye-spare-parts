@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getStaffNames, requireAdmin } from "@/lib/session";
 import { getDisplayCurrency, getLang, getT } from "@/lib/i18n/server";
+import { uncertainCostSales } from "@/lib/data";
 import { fmtDateTime, fmtInt, fmtMoney, periodRange, pickMoney, rangeToIso, type Currency } from "@/lib/format";
 import type { DictKey } from "@/lib/i18n/dict";
 import type { ReportSummary, Revision } from "@/lib/types";
@@ -20,15 +21,12 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const period = parsePeriod(sp.period, "month");
   const range = periodRange(period, sp.from, sp.to);
   const iso = rangeToIso(range);
-  let zeroCost = s.supabase.from("sales").select("id", { count: "exact", head: true }).eq("business_id", s.business.id).eq("status", "active").eq("unit_cost_usd", 0);
-  if (iso.start) zeroCost = zeroCost.gte("created_at", iso.start);
-  if (iso.end) zeroCost = zeroCost.lt("created_at", iso.end);
   const [report, revisions, staff, zc] = await Promise.all([
     s.supabase.rpc("report_summary", { p_from: range.from, p_to: range.to }),
     s.supabase.from("record_revisions").select("id, table_name, record_id, action, actor, reason, changed_fields, created_at")
       .eq("business_id", s.business.id).neq("action", "create").order("id", { ascending: false }).limit(40),
     getStaffNames(s.business.id),
-    zeroCost,
+    uncertainCostSales(s.supabase, s.business.id, iso),
   ]);
   const r = (report.data ?? {}) as ReportSummary;
   const qs = new URLSearchParams({ period, ...(period === "custom" && range.from ? { from: range.from } : {}), ...(period === "custom" && range.to ? { to: range.to } : {}) }).toString();
@@ -48,7 +46,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         <StatCard icon="wrench" label={t("rep.bjShop")} value={pickMoney(r, "banjarka_shop", cur)} />
         <StatCard icon="pencil" tone="amber" label={t("dash.editedRecords")} value={fmtInt(r.edited_count)} />
       </div>
-      {(zc.count ?? 0) > 0 && <Alert tone="warning" className="mt-4">{t("rep.zeroCost", { n: zc.count ?? 0 })}</Alert>}
+      {zc > 0 && <Alert tone="warning" className="mt-4">{t("rep.zeroCost", { n: zc })}</Alert>}
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <section className="card">
